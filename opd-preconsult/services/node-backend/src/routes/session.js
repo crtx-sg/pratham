@@ -1,0 +1,139 @@
+const { Router } = require('express');
+const pool = require('../models/db');
+const { signToken, authMiddleware } = require('../middleware/auth');
+
+const router = Router();
+
+// Decode QR and create session
+router.post('/scan', async (req, res) => {
+  try {
+    const { qr_payload } = req.body;
+    let decoded;
+    try {
+      decoded = JSON.parse(Buffer.from(qr_payload, 'base64').toString());
+    } catch {
+      return res.status(400).json({ error: 'Invalid QR payload' });
+    }
+
+    const { hospital_id, department, queue_slot } = decoded;
+    if (!hospital_id || !department) {
+      return res.status(400).json({ error: 'Missing hospital_id or department' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO sessions (hospital_id, department, queue_slot, state)
+       VALUES ($1, $2, $3, 'INIT') RETURNING *`,
+      [hospital_id, department, queue_slot || null]
+    );
+
+    const session = result.rows[0];
+    const token = signToken({ session_id: session.id, hospital_id, department });
+
+    res.json({ session, token });
+  } catch (err) {
+    console.error('scan error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Register patient identity
+router.post('/register', authMiddleware, async (req, res) => {
+  try {
+    const { session_id } = req.session_data;
+    const { patient_name, patient_phone, patient_age, patient_gender, language } = req.body;
+
+    if (!patient_name || !patient_phone) {
+      return res.status(400).json({ error: 'Name and phone required' });
+    }
+
+    const result = await pool.query(
+      `UPDATE sessions SET
+        patient_name = $1, patient_phone = $2, patient_age = $3,
+        patient_gender = $4, language = COALESCE($5, language),
+        state = 'REGISTERED', updated_at = NOW()
+       WHERE id = $6 RETURNING *`,
+      [patient_name, patient_phone, patient_age || null, patient_gender || null, language, session_id]
+    );
+
+    if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('register error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Give consent
+router.post('/consent', authMiddleware, async (req, res) => {
+  try {
+    const { session_id } = req.session_data;
+    const result = await pool.query(
+      `UPDATE sessions SET consent_given = true, consent_at = NOW(),
+       state = 'CONSENTED', updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [session_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+
+    await pool.query(
+      `INSERT INTO audit_log (session_id, event_type, actor) VALUES ($1, 'consent_given', 'patient')`,
+      [session_id]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('consent error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Update session state
+router.post('/state', authMiddleware, async (req, res) => {
+  try {
+    const { session_id } = req.session_data;
+    const { state } = req.body;
+    const valid = ['INIT', 'REGISTERED', 'CONSENTED', 'INTERVIEW', 'VITALS', 'COMPLETE'];
+    if (!valid.includes(state)) return res.status(400).json({ error: 'Invalid state' });
+
+    const result = await pool.query(
+      `UPDATE sessions SET state = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [state, session_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('state error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get session by ID
+router.get('/:id', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM sessions WHERE id = $1', [req.params.id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('get session error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// List sessions (for doctor queue)
+router.get('/', async (req, res) => {
+  try {
+    const { department, state } = req.query;
+    let query = 'SELECT * FROM sessions WHERE 1=1';
+    const params = [];
+    if (department) { params.push(department); query += ` AND department = $${params.length}`; }
+    if (state) { params.push(state); query += ` AND state = $${params.length}`; }
+    query += ' ORDER BY created_at DESC LIMIT 50';
+    const result = await pool.query(query, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('list sessions error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+module.exports = router;

@@ -1,0 +1,219 @@
+[
+  {
+    "id": "q_visit_type",
+    "department": "CARD",
+    "text_en": "Is this your first visit or a follow-up?",
+    "text_hi": "क्या यह आपकी पहली विजिट है या फॉलो-अप?",
+    "text_te": "ఇది మీ మొదటి సందర్శన లేదా ఫాలో-అప్?",
+    "q_type": "SINGLE_SELECT",
+    "options_json": [
+      {"value": "first", "label_en": "First visit", "label_hi": "पहली विजिट", "label_te": "మొదటి సందర్శన"},
+      {"value": "followup", "label_en": "Follow-up", "label_hi": "फॉलो-अप", "label_te": "ఫాలో-అప్"}
+    ],
+    "next_rules": [
+      {"if_answer": "followup", "go_to": "q_last_visit_complaint"},
+      {"if_answer": "first", "go_to": "q_chief_complaint"}
+    ],
+    "sort_order": 1
+  },
+  {
+    "id": "q_last_visit_complaint",
+    "department": "CARD",
+    "text_en": "What did you come for last time?",
+    "text_hi": "पिछली बार आप किस समस्या के लिए आए थे?",
+    "text_te": "గత సారి మీరు ఏ సమస్య కోసం వచ్చారు?",
+    "q_type": "FREE_TEXT",
+    "next_default": "q_progress",
+    "sort_order": 2
+  },
+  {
+    "id": "q_progress",
+    "department": "CARD",
+    "text_en": "How are you feeling compared to last visit?",
+    "text_hi": "पिछली विजिट की तुलना में आप कैसा महसूस कर रहे हैं?",
+    "text_te": "గత సందర్శనతో పోలిస్తే మీరు ఎలా భావిస్తున్నారు?",
+    "q_type": "SINGLE_SELECT",
+    "options_json": [
+      {"value": "better", "label_en": "Better", "label_hi": "बेहतर", "label_te": "మెరుగ్గా"},
+      {"value": "same", "label_en": "Same", "label_hi": "वैसा ही", "label_te": "అలాగే"},
+      {"value": "worse", "label_en": "Worse", "label_hi": "बदतर", "label_te": "అధ్వాన్నంగా"},
+      {"value": "new_symptoms", "label_en": "New symptoms", "label_hi": "नए लक्षण", "label_te": "కొత్త లక్షణాలు"}
+    ],
+    "next_default": "q_chief_complaint",
+    "sort_order": 3
+  },
+  {
+    "id": "q_chief_complaint",
+    "department": "CARD",
+    "text_en": "What is your main concern today?",
+    "text_hi": "आज आपकी मुख्य समस्या क्या है?",
+    "text_te": "ఈరోజు మీ ప్రధాన సమస్య ఏమిటి?",
+    "q_type": "FREE_TEXT",
+    "next_default": "q_chest_pain",
+    "sort_order": 4
+  },
+  {
+    "id": "q_chest_pain",
+    "department": "CARD",
+    "text_en": "Do you have chest pain or tightness?",
+    "text_hi": "क्या आपको सीने में दर्द या जकड़न है?",
+    "text_te": "మీకు ఛాతీ నొప్పి లేదా బిగుతు ఉందా?",
+    "q_type": "BOOLEAN",
+    "triage_flag": "RED",
+    "triage_answer": "yes",
+    "next_rules": [
+      {"if_answer": "yes", "go_to": "q_chest_pain_radiation"},
+      {"if_answer": "no", "go_to": "q_breathlessness"}
+    ],
+    "sort_order": 5
+  },
+  {
+    "id": "q_chest_pain_radiation",
+    "department": "CARD",
+    "text_en": "Does the pain spread to your arm, jaw, or shoulder?",
+    "text_hi": "क्या दर्द आपके हाथ, जबड़े या कंधे तक फैलता है?",
+    "text_te": "నొప్పి మీ చేతి, దవడ లేదా భుజానికి వ్యాపిస్తుందా?",
+    "q_type": "BOOLEAN",
+    "triage_flag": "RED",
+    "triage_answer": "yes",
+    "next_default": "q_breathlessness",
+    "sort_order": 6
+  },
+  {
+    "id": "q_breathlessness",
+    "department": "CARD",
+    "text_en": "Do you experience breathlessness?",
+    "text_hi": "क्या आपको सांस लेने में तकलीफ होती है?",
+    "text_te": "మీకు ఊపిరి ఆడకపోవడం అనుభవమవుతుందా?",
+    "q_type": "SINGLE_SELECT",
+    "options_json": [
+      {"value": "none", "label_en": "None", "label_hi": "नहीं", "label_te": "లేదు"},
+      {"value": "on_exertion", "label_en": "On exertion", "label_hi": "मेहनत करने पर", "label_te": "శ్రమ చేసినప్పుడు"},
+      {"value": "at_rest", "label_en": "At rest", "label_hi": "आराम करते समय", "label_te": "విశ్రాంతిలో"},
+      {"value": "lying_flat", "label_en": "Lying flat", "label_hi": "लेटने पर", "label_te": "పడుకున్నప్పుడు"}
+    ],
+    "triage_flag": "AMBER",
+    "triage_answer": "at_rest",
+    "next_default": "q_palpitations",
+    "sort_order": 7
+  },
+  {
+    "id": "q_palpitations",
+    "department": "CARD",
+    "text_en": "Do you have irregular heartbeat or palpitations?",
+    "text_hi": "क्या आपकी धड़कन अनियमित है या तेज़ धड़कन होती है?",
+    "text_te": "మీకు అసమాన గుండె కొట్టుకోవడం లేదా గుండె దడ ఉందా?",
+    "q_type": "BOOLEAN",
+    "next_default": "q_swelling",
+    "sort_order": 8
+  },
+  {
+    "id": "q_swelling",
+    "department": "CARD",
+    "text_en": "Do you have swelling in your feet or ankles?",
+    "text_hi": "क्या आपके पैरों या टखनों में सूजन है?",
+    "text_te": "మీ పాదాలు లేదా చీలమండలాలలో వాపు ఉందా?",
+    "q_type": "BOOLEAN",
+    "next_default": "q_syncope",
+    "sort_order": 9
+  },
+  {
+    "id": "q_syncope",
+    "department": "CARD",
+    "text_en": "Have you fainted or felt like you would faint?",
+    "text_hi": "क्या आप बेहोश हुए हैं या बेहोश होने जैसा लगा है?",
+    "text_te": "మీరు స్పృహ కోల్పోయారా లేదా స్పృహ కోల్పోతున్నట్లు అనిపించిందా?",
+    "q_type": "BOOLEAN",
+    "triage_flag": "AMBER",
+    "triage_answer": "yes",
+    "next_default": "q_medications",
+    "sort_order": 10
+  },
+  {
+    "id": "q_medications",
+    "department": "CARD",
+    "text_en": "List your current medicines (name and dose)",
+    "text_hi": "अपनी वर्तमान दवाइयाँ बताएं (नाम और खुराक)",
+    "text_te": "మీ ప్రస్తుత మందులను తెలపండి (పేరు మరియు మోతాదు)",
+    "q_type": "FREE_TEXT",
+    "next_default": "q_allergies",
+    "sort_order": 11
+  },
+  {
+    "id": "q_allergies",
+    "department": "CARD",
+    "text_en": "Any known drug allergies? If none, say none.",
+    "text_hi": "कोई ज्ञात दवा एलर्जी? अगर नहीं तो 'नहीं' कहें।",
+    "text_te": "ఏదైనా తెలిసిన మందు అలెర్జీలు? లేకపోతే 'లేదు' చెప్పండి.",
+    "q_type": "FREE_TEXT",
+    "next_default": "q_surgery_history",
+    "sort_order": 12
+  },
+  {
+    "id": "q_surgery_history",
+    "department": "CARD",
+    "text_en": "Have you had any heart surgery or procedure?",
+    "text_hi": "क्या आपकी कोई हृदय शल्य चिकित्सा या प्रक्रिया हुई है?",
+    "text_te": "మీకు ఏదైనా గుండె శస్త్రచికిత్స లేదా ప్రక్రియ జరిగిందా?",
+    "q_type": "BOOLEAN",
+    "next_rules": [
+      {"if_answer": "yes", "go_to": "q_surgery_detail"},
+      {"if_answer": "no", "go_to": "q_diabetes"}
+    ],
+    "sort_order": 13
+  },
+  {
+    "id": "q_surgery_detail",
+    "department": "CARD",
+    "text_en": "What surgery and when? (e.g., bypass 2021, valve repair 2023)",
+    "text_hi": "कौन सी सर्जरी और कब? (जैसे, बाइपास 2021, वाल्व रिपेयर 2023)",
+    "text_te": "ఏ శస్త్రచికిత్స మరియు ఎప్పుడు? (ఉదా., బైపాస్ 2021, వాల్వ్ రిపేర్ 2023)",
+    "q_type": "FREE_TEXT",
+    "next_default": "q_diabetes",
+    "sort_order": 14
+  },
+  {
+    "id": "q_diabetes",
+    "department": "CARD",
+    "text_en": "Do you have diabetes?",
+    "text_hi": "क्या आपको मधुमेह (शुगर) है?",
+    "text_te": "మీకు మధుమేహం (షుగర్) ఉందా?",
+    "q_type": "BOOLEAN",
+    "next_default": "q_hypertension",
+    "sort_order": 15
+  },
+  {
+    "id": "q_hypertension",
+    "department": "CARD",
+    "text_en": "Do you have high blood pressure (hypertension)?",
+    "text_hi": "क्या आपको उच्च रक्तचाप (हाइपरटेंशन) है?",
+    "text_te": "మీకు అధిక రక్తపోటు (హైపర్‌టెన్షన్) ఉందా?",
+    "q_type": "BOOLEAN",
+    "next_default": "q_smoking",
+    "sort_order": 16
+  },
+  {
+    "id": "q_smoking",
+    "department": "CARD",
+    "text_en": "Do you smoke?",
+    "text_hi": "क्या आप धूम्रपान करते हैं?",
+    "text_te": "మీరు పొగ తాగుతారా?",
+    "q_type": "SINGLE_SELECT",
+    "options_json": [
+      {"value": "never", "label_en": "Never", "label_hi": "कभी नहीं", "label_te": "ఎప్పుడూ లేదు"},
+      {"value": "ex_smoker", "label_en": "Ex-smoker", "label_hi": "पहले करता था", "label_te": "గతంలో చేసేవాడు"},
+      {"value": "current", "label_en": "Current smoker", "label_hi": "वर्तमान में", "label_te": "ప్రస్తుతం చేస్తున్నారు"}
+    ],
+    "next_default": "q_done",
+    "sort_order": 17
+  },
+  {
+    "id": "q_done",
+    "department": "CARD",
+    "text_en": "Thank you. Your responses have been recorded.",
+    "text_hi": "धन्यवाद। आपके जवाब दर्ज हो गए हैं।",
+    "text_te": "ధన్యవాదాలు. మీ సమాధానాలు నమోదు చేయబడ్డాయి.",
+    "q_type": "TERMINAL",
+    "sort_order": 99
+  }
+]

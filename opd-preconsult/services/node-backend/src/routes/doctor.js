@@ -1,0 +1,271 @@
+const { Router } = require('express');
+const crypto = require('crypto');
+const pool = require('../models/db');
+const { signToken } = require('../middleware/auth');
+
+const router = Router();
+
+function hashPin(pin) {
+  return crypto.createHash('sha256').update(pin).digest('hex');
+}
+
+// Doctor PIN login
+router.post('/login', async (req, res) => {
+  try {
+    const { phone, pin } = req.body;
+    if (!phone || !pin) return res.status(400).json({ error: 'Phone and PIN required' });
+
+    const result = await pool.query(
+      'SELECT * FROM doctors WHERE phone = $1 AND is_active = true',
+      [phone]
+    );
+    if (!result.rows.length) return res.status(401).json({ error: 'Doctor not found' });
+
+    const doctor = result.rows[0];
+    if (doctor.pin_hash !== hashPin(pin)) {
+      return res.status(401).json({ error: 'Invalid PIN' });
+    }
+
+    const token = signToken({
+      doctor_id: doctor.id,
+      doctor_name: doctor.name,
+      department: doctor.department,
+      role: 'doctor',
+    });
+
+    await pool.query(
+      `INSERT INTO audit_log (event_type, actor, payload) VALUES ('doctor_login', $1, $2)`,
+      [doctor.id, JSON.stringify({ name: doctor.name })]
+    );
+
+    res.json({
+      token,
+      doctor: { id: doctor.id, name: doctor.name, department: doctor.department },
+    });
+  } catch (err) {
+    console.error('doctor login error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// List doctors (for admin)
+router.get('/', async (req, res) => {
+  try {
+    const { department } = req.query;
+    let q = 'SELECT id, name, department, phone, is_active, created_at FROM doctors WHERE 1=1';
+    const params = [];
+    if (department) { params.push(department); q += ` AND department = $${params.length}`; }
+    q += ' ORDER BY name';
+    const result = await pool.query(q, params);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Get doctor's queue — assigned to them + unassigned in their department
+router.get('/queue', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).json({ error: 'No token' });
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(auth.replace('Bearer ', ''), process.env.JWT_SECRET || 'dev_secret');
+    if (decoded.role !== 'doctor') return res.status(403).json({ error: 'Not a doctor token' });
+
+    const { doctor_id, department } = decoded;
+
+    const result = await pool.query(
+      `SELECT s.*, d.name as doctor_name FROM sessions s
+       LEFT JOIN doctors d ON s.assigned_doctor_id = d.id
+       WHERE s.department = $1
+         AND (s.assigned_doctor_id = $2 OR s.assigned_doctor_id IS NULL)
+         AND s.created_at > NOW() - INTERVAL '24 hours'
+       ORDER BY
+         CASE s.triage_level WHEN 'RED' THEN 0 WHEN 'AMBER' THEN 1 ELSE 2 END,
+         s.created_at DESC
+       LIMIT 50`,
+      [department, doctor_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('doctor queue error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Assign session to doctor (self-assign or by admin)
+router.post('/assign/:session_id', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).json({ error: 'No token' });
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(auth.replace('Bearer ', ''), process.env.JWT_SECRET || 'dev_secret');
+    if (decoded.role !== 'doctor') return res.status(403).json({ error: 'Not a doctor token' });
+
+    const result = await pool.query(
+      `UPDATE sessions SET assigned_doctor_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [decoded.doctor_id, req.params.session_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+
+    await pool.query(
+      `INSERT INTO audit_log (session_id, event_type, actor, payload) VALUES ($1, 'doctor_assigned', $2, $3)`,
+      [req.params.session_id, decoded.doctor_id, JSON.stringify({ doctor_name: decoded.doctor_name })]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('assign error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Unassign session — send back to pool
+router.post('/unassign/:session_id', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).json({ error: 'No token' });
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(auth.replace('Bearer ', ''), process.env.JWT_SECRET || 'dev_secret');
+    if (decoded.role !== 'doctor') return res.status(403).json({ error: 'Not a doctor token' });
+
+    const result = await pool.query(
+      `UPDATE sessions SET assigned_doctor_id = NULL, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [req.params.session_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+
+    await pool.query(
+      `INSERT INTO audit_log (session_id, event_type, actor, payload) VALUES ($1, 'doctor_unassigned', $2, $3)`,
+      [req.params.session_id, decoded.doctor_id, JSON.stringify({ doctor_name: decoded.doctor_name })]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('unassign error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Reassign session to a different doctor (or unassign if target_doctor_id is null/empty)
+router.post('/reassign/:session_id', async (req, res) => {
+  try {
+    const { target_doctor_id } = req.body;
+
+    // If null/empty, unassign
+    if (!target_doctor_id) {
+      const result = await pool.query(
+        `UPDATE sessions SET assigned_doctor_id = NULL, updated_at = NOW() WHERE id = $1 RETURNING *`,
+        [req.params.session_id]
+      );
+      if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+
+      await pool.query(
+        `INSERT INTO audit_log (session_id, event_type, actor, payload) VALUES ($1, 'doctor_unassigned', 'admin', '{}')`,
+        [req.params.session_id]
+      );
+      return res.json(result.rows[0]);
+    }
+
+    // Verify target doctor exists
+    const doc = await pool.query('SELECT id, name, department FROM doctors WHERE id = $1 AND is_active = true', [target_doctor_id]);
+    if (!doc.rows.length) return res.status(404).json({ error: 'Target doctor not found' });
+
+    const result = await pool.query(
+      `UPDATE sessions SET assigned_doctor_id = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [target_doctor_id, req.params.session_id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Session not found' });
+
+    await pool.query(
+      `INSERT INTO audit_log (session_id, event_type, actor, payload) VALUES ($1, 'doctor_reassigned', 'admin', $2)`,
+      [req.params.session_id, JSON.stringify({ target_doctor: doc.rows[0].name, target_id: target_doctor_id })]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('reassign error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Doctor's consulted patients — completed sessions assigned to them
+router.get('/consulted', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).json({ error: 'No token' });
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(auth.replace('Bearer ', ''), process.env.JWT_SECRET || 'dev_secret');
+    if (decoded.role !== 'doctor') return res.status(403).json({ error: 'Not a doctor token' });
+
+    const result = await pool.query(
+      `SELECT s.*, sr.doctor_feedback, sr.created_at as report_created_at
+       FROM sessions s
+       LEFT JOIN session_reports sr ON sr.session_id = s.id
+       WHERE s.assigned_doctor_id = $1
+         AND s.state = 'COMPLETE'
+       ORDER BY s.updated_at DESC
+       LIMIT 100`,
+      [decoded.doctor_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('consulted error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// All sessions with doctor info — for HIS/admin dashboard
+router.get('/all-sessions', async (req, res) => {
+  try {
+    const { department, doctor_id, state } = req.query;
+    let q = `SELECT s.*, d.name as doctor_name, d.department as doctor_dept,
+             sr.doctor_feedback, sr.created_at as report_created_at
+             FROM sessions s
+             LEFT JOIN doctors d ON s.assigned_doctor_id = d.id
+             LEFT JOIN session_reports sr ON sr.session_id = s.id
+             WHERE s.created_at > NOW() - INTERVAL '7 days'`;
+    const params = [];
+    if (department) { params.push(department); q += ` AND s.department = $${params.length}`; }
+    if (doctor_id) { params.push(doctor_id); q += ` AND s.assigned_doctor_id = $${params.length}`; }
+    if (state) { params.push(state); q += ` AND s.state = $${params.length}`; }
+    q += ' ORDER BY s.created_at DESC LIMIT 200';
+    const result = await pool.query(q, params);
+    res.json(result.rows);
+  } catch (err) {
+    console.error('all-sessions error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Change PIN
+router.post('/change-pin', async (req, res) => {
+  try {
+    const auth = req.headers.authorization;
+    if (!auth) return res.status(401).json({ error: 'No token' });
+
+    const jwt = require('jsonwebtoken');
+    const decoded = jwt.verify(auth.replace('Bearer ', ''), process.env.JWT_SECRET || 'dev_secret');
+    if (decoded.role !== 'doctor') return res.status(403).json({ error: 'Not a doctor token' });
+
+    const { old_pin, new_pin } = req.body;
+    if (!old_pin || !new_pin) return res.status(400).json({ error: 'old_pin and new_pin required' });
+    if (new_pin.length < 4 || new_pin.length > 6) return res.status(400).json({ error: 'PIN must be 4-6 digits' });
+
+    const doc = await pool.query('SELECT pin_hash FROM doctors WHERE id = $1', [decoded.doctor_id]);
+    if (!doc.rows.length || doc.rows[0].pin_hash !== hashPin(old_pin)) {
+      return res.status(401).json({ error: 'Invalid current PIN' });
+    }
+
+    await pool.query('UPDATE doctors SET pin_hash = $1 WHERE id = $2', [hashPin(new_pin), decoded.doctor_id]);
+    res.json({ updated: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+module.exports = router;

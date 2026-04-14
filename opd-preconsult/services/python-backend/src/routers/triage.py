@@ -1,0 +1,77 @@
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+from ..db import query, execute
+
+router = APIRouter(prefix="/api/triage", tags=["triage"])
+
+class TriageRequest(BaseModel):
+    session_id: str
+
+class TriageResponse(BaseModel):
+    level: str
+    triggered_rules: list
+
+@router.post("/evaluate", response_model=TriageResponse)
+async def evaluate(req: TriageRequest):
+    # Load answers
+    answers_rows = query(
+        "SELECT question_id, answer_raw FROM session_answers WHERE session_id = %s",
+        (req.session_id,),
+    )
+    answers = {a["question_id"]: (a["answer_raw"] or "").lower() for a in answers_rows}
+
+    # Load vitals
+    vitals_rows = query(
+        "SELECT * FROM session_vitals WHERE session_id = %s ORDER BY recorded_at DESC LIMIT 1",
+        (req.session_id,),
+    )
+    vitals = vitals_rows[0] if vitals_rows else {}
+
+    triggered = []
+    level = "GREEN"
+
+    # RED rules
+    if answers.get("q_chest_pain") == "yes" and answers.get("q_chest_pain_radiation") == "yes":
+        triggered.append("chest_pain_with_radiation")
+        level = "RED"
+
+    if answers.get("q_syncope") == "yes" and answers.get("q_chest_pain") == "yes":
+        triggered.append("syncope_with_chest_pain")
+        level = "RED"
+
+    bp_sys = vitals.get("bp_systolic")
+    bp_dia = vitals.get("bp_diastolic")
+    spo2 = vitals.get("spo2_pct")
+
+    if bp_sys and bp_sys > 180:
+        triggered.append("bp_systolic_critical")
+        level = "RED"
+    if bp_dia and bp_dia > 120:
+        triggered.append("bp_diastolic_critical")
+        level = "RED"
+    if spo2 and spo2 < 90:
+        triggered.append("spo2_critical")
+        level = "RED"
+
+    # AMBER rules (only if not already RED)
+    if level != "RED":
+        if answers.get("q_breathlessness") == "at_rest":
+            triggered.append("breathlessness_at_rest")
+            level = "AMBER"
+
+        if answers.get("q_syncope") == "yes":
+            triggered.append("syncope_alone")
+            level = "AMBER"
+
+        if bp_sys and 160 <= bp_sys <= 180:
+            triggered.append("bp_systolic_elevated")
+            level = "AMBER"
+
+    # Update session triage level
+    execute(
+        "UPDATE sessions SET triage_level = %s, updated_at = NOW() WHERE id = %s",
+        (level, req.session_id),
+    )
+
+    return TriageResponse(level=level, triggered_rules=triggered)

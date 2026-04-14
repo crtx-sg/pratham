@@ -1,0 +1,172 @@
+'use client';
+import { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { api, setToken } from '../../../lib/api';
+import { t } from '../../../lib/i18n';
+
+const DOC_TYPES = [
+  { value: 'prescription', label_en: 'Prescription', label_hi: 'प्रिस्क्रिप्शन', label_te: 'ప్రిస్క్రిప్షన్' },
+  { value: 'lab_report', label_en: 'Lab Report', label_hi: 'लैब रिपोर्ट', label_te: 'ల్యాబ్ రిపోర్ట్' },
+  { value: 'discharge_summary', label_en: 'Discharge Summary', label_hi: 'डिस्चार्ज समरी', label_te: 'డిశ్చార్జ్ సమ్మరీ' },
+  { value: 'diagnostic_report', label_en: 'ECG / Echo / X-ray', label_hi: 'ECG / Echo / X-ray', label_te: 'ECG / Echo / X-ray' },
+];
+
+export default function Documents() {
+  const router = useRouter();
+  const [lang, setLang] = useState('en');
+  const [sessionId, setSessionId] = useState('');
+  const [docs, setDocs] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [selectedType, setSelectedType] = useState('prescription');
+
+  useEffect(() => {
+    setLang(sessionStorage.getItem('lang') || 'en');
+    const token = sessionStorage.getItem('token');
+    if (token) setToken(token);
+    const sid = sessionStorage.getItem('session_id');
+    setSessionId(sid || '');
+  }, []);
+
+  async function handleUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    setLoading(true);
+    try {
+      const result = await api.uploadDocument(file, sessionId, selectedType);
+      setDocs(prev => [...prev, { ...result, type: selectedType, confirmed: false }]);
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setLoading(false);
+      e.target.value = '';
+    }
+  }
+
+  async function handleConfirm(idx) {
+    const doc = docs[idx];
+    if (!doc.doc_id) return;
+    await api.confirmDocument(doc.doc_id, true);
+    setDocs(prev => prev.map((d, i) => i === idx ? { ...d, confirmed: true } : d));
+  }
+
+  async function handleReject(idx) {
+    const doc = docs[idx];
+    if (!doc.doc_id) return;
+    await api.confirmDocument(doc.doc_id, false);
+    setDocs(prev => prev.filter((_, i) => i !== idx));
+  }
+
+  const langKey = (dt) => dt[`label_${lang}`] || dt.label_en;
+
+  return (
+    <div className="screen">
+      <div className="progress-dots">
+        <span className="dot done" /><span className="dot done" /><span className="dot active" /><span className="dot" /><span className="dot" />
+      </div>
+      <div className="card" style={{ gap: 16 }}>
+        <h2 style={{ textAlign: 'center', color: 'var(--primary)' }}>{t('documents_title', lang)}</h2>
+        <p style={{ color: 'var(--text-light)', textAlign: 'center', fontSize: 14 }}>{t('documents_desc', lang)}</p>
+
+        {/* Document type selector */}
+        <div>
+          <label style={{ fontSize: 13, color: 'var(--text-light)', marginBottom: 4, display: 'block' }}>Document type</label>
+          <select className="input" value={selectedType} onChange={e => setSelectedType(e.target.value)}>
+            {DOC_TYPES.map(dt => (
+              <option key={dt.value} value={dt.value}>{langKey(dt)}</option>
+            ))}
+          </select>
+        </div>
+
+        {/* Upload button */}
+        <label className="btn btn-secondary" style={{ position: 'relative' }}>
+          {loading ? 'Processing...' : `📷 ${t('upload', lang)}`}
+          <input
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleUpload}
+            disabled={loading}
+            style={{ position: 'absolute', opacity: 0, width: '100%', height: '100%', top: 0, left: 0, cursor: 'pointer' }}
+          />
+        </label>
+
+        {/* Uploaded documents list */}
+        {docs.length > 0 && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ fontWeight: 600, fontSize: 14 }}>{docs.length} document{docs.length > 1 ? 's' : ''} uploaded</p>
+
+            {docs.map((doc, idx) => (
+              <div key={idx} style={{
+                background: doc.confirmed ? '#E8F8F5' : '#F8F9FA',
+                borderRadius: 12, padding: 14,
+                border: doc.confirmed ? '2px solid var(--accent)' : '1px solid #E0E0E0',
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <span style={{ fontWeight: 600, fontSize: 13, textTransform: 'capitalize' }}>
+                    {doc.type.replace('_', ' ')}
+                  </span>
+                  <span style={{ fontSize: 11, color: 'var(--text-light)' }}>
+                    Confidence: {Math.round((doc.confidence || 0) * 100)}%
+                  </span>
+                  {doc.confirmed && <span style={{ fontSize: 11, color: 'var(--accent)', fontWeight: 600 }}>✓ Confirmed</span>}
+                </div>
+
+                {/* Medications */}
+                {doc.structured?.medications?.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)' }}>Medications:</p>
+                    {doc.structured.medications.map((m, i) => (
+                      <p key={i} style={{ fontSize: 13, marginLeft: 8 }}>• {m.name} {m.dose || ''} {m.frequency || ''}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Lab values */}
+                {doc.structured?.lab_values?.length > 0 && (
+                  <div style={{ marginBottom: 8 }}>
+                    <p style={{ fontSize: 12, fontWeight: 600, color: 'var(--primary)' }}>Lab Results:</p>
+                    {doc.structured.lab_values.map((l, i) => (
+                      <p key={i} style={{ fontSize: 13, marginLeft: 8 }}>• {l.test}: {l.value} {l.raw_match ? `(${l.raw_match})` : ''}</p>
+                    ))}
+                  </div>
+                )}
+
+                {/* Raw text preview (collapsed) */}
+                {!doc.structured?.medications?.length && !doc.structured?.lab_values?.length && (
+                  <p style={{ fontSize: 12, color: 'var(--text-light)', whiteSpace: 'pre-wrap', maxHeight: 80, overflow: 'hidden' }}>
+                    {doc.raw_text?.substring(0, 200)}...
+                  </p>
+                )}
+
+                {/* Confirm / Reject buttons */}
+                {!doc.confirmed && (
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <button
+                      className="btn btn-accent"
+                      style={{ flex: 1, minHeight: 40, fontSize: 13 }}
+                      onClick={() => handleConfirm(idx)}
+                    >
+                      ✓ Correct
+                    </button>
+                    <button
+                      className="btn btn-outline"
+                      style={{ flex: 1, minHeight: 40, fontSize: 13, borderColor: 'var(--red)', color: 'var(--red)' }}
+                      onClick={() => handleReject(idx)}
+                    >
+                      ✗ Remove
+                    </button>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ flex: 1 }} />
+        <button className="btn btn-primary" onClick={() => router.push('/patient/interview')}>
+          {docs.length > 0 ? t('next', lang) : t('skip', lang)}
+        </button>
+      </div>
+    </div>
+  );
+}
