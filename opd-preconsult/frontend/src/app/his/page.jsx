@@ -5,6 +5,7 @@ import TriageBadge from '../../components/TriageBadge';
 import ReactMarkdown from 'react-markdown';
 
 export default function HISPage() {
+  const [tab, setTab] = useState('sessions'); // sessions | doctors
   const [sessions, setSessions] = useState([]);
   const [doctors, setDoctors] = useState([]);
   const [selected, setSelected] = useState(null);
@@ -14,10 +15,14 @@ export default function HISPage() {
 
   useEffect(() => {
     loadData();
-    api.listDoctors().then(setDoctors).catch(() => {});
+    loadDoctors();
     const interval = setInterval(loadData, 15000);
     return () => clearInterval(interval);
   }, []);
+
+  async function loadDoctors() {
+    try { setDoctors(await api.listDoctors()); } catch {}
+  }
 
   useEffect(() => { loadData(); }, [filters]);
 
@@ -89,10 +94,20 @@ export default function HISPage() {
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
         <h1 style={{ fontSize: 20, color: 'var(--primary)' }}>🏥 HIS Dashboard</h1>
-        <span style={{ fontSize: 13, color: 'var(--text-light)' }}>Hospital Information System — Patient & Doctor Overview</span>
-        <button className="btn btn-outline" style={{ marginLeft: 'auto', fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
-          onClick={loadData}>Refresh</button>
+        <span style={{ fontSize: 13, color: 'var(--text-light)' }}>Hospital Information System</span>
+        <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+          <button className={`btn ${tab === 'sessions' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={() => setTab('sessions')}>Patients</button>
+          <button className={`btn ${tab === 'doctors' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={() => setTab('doctors')}>Manage Doctors</button>
+        </div>
       </div>
+
+      {tab === 'doctors' ? (
+        <DoctorsManager doctors={doctors} onChange={loadDoctors} />
+      ) : (<>
 
       {/* Doctor Summary Cards */}
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
@@ -231,6 +246,144 @@ export default function HISPage() {
               !loading && <p style={{ color: 'var(--text-light)' }}>No report generated yet.</p>
             )}
           </div>
+        )}
+      </div>
+      </>)}
+    </div>
+  );
+}
+
+
+function DoctorsManager({ doctors, onChange }) {
+  const [form, setForm] = useState({ name: '', department: 'CARD', phone: '', pin: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    if (form.pin.length < 4 || form.pin.length > 6) {
+      setError('PIN must be 4-6 digits');
+      return;
+    }
+    setSaving(true);
+    try {
+      const created = await api.createDoctor(form);
+      setSuccess(`Added ${created.name} (${created.department})`);
+      setForm({ name: '', department: form.department, phone: '', pin: '' });
+      onChange();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDeactivate(doctor) {
+    if (!confirm(`Deactivate ${doctor.name}? They won't be able to log in, but historical data is kept.`)) return;
+    try {
+      await api.deactivateDoctor(doctor.id);
+      onChange();
+    } catch (err) {
+      alert('Failed: ' + err.message);
+    }
+  }
+
+  const active = doctors.filter(d => d.is_active);
+  const inactive = doctors.filter(d => !d.is_active);
+
+  return (
+    <div style={{ display: 'flex', gap: 16 }}>
+      {/* Add doctor form */}
+      <div style={{ width: 360, flexShrink: 0, background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', height: 'fit-content' }}>
+        <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--primary)' }}>Add New Doctor</h3>
+
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-light)' }}>Name *</label>
+            <input className="input" required value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder="Dr. Ravi Kumar" />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-light)' }}>Department *</label>
+            <select className="input" value={form.department}
+              onChange={e => setForm({ ...form, department: e.target.value })}>
+              <option value="CARD">Cardiology (CARD)</option>
+              <option value="GEN">General Medicine (GEN)</option>
+            </select>
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-light)' }}>Phone *</label>
+            <input className="input" type="tel" required value={form.phone}
+              onChange={e => setForm({ ...form, phone: e.target.value })}
+              placeholder="9876500099" />
+          </div>
+
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-light)' }}>PIN (4-6 digits) *</label>
+            <input className="input" type="password" inputMode="numeric" maxLength={6} required
+              value={form.pin}
+              onChange={e => setForm({ ...form, pin: e.target.value.replace(/\D/g, '') })}
+              placeholder="••••" style={{ letterSpacing: 4 }} />
+          </div>
+
+          {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
+          {success && <p style={{ color: 'var(--green)', fontSize: 13 }}>{success}</p>}
+
+          <button className="btn btn-primary" type="submit" disabled={saving}>
+            {saving ? 'Adding...' : 'Add Doctor'}
+          </button>
+        </form>
+      </div>
+
+      {/* Doctors list */}
+      <div style={{ flex: 1 }}>
+        <h3 style={{ fontSize: 16, marginBottom: 12, color: 'var(--primary)' }}>
+          Doctors ({active.length} active{inactive.length > 0 ? `, ${inactive.length} inactive` : ''})
+        </h3>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+          <thead>
+            <tr style={{ background: 'var(--primary)', color: '#fff', fontSize: 13 }}>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Name</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Department</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Phone</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Status</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {doctors.map(d => (
+              <tr key={d.id} style={{ borderBottom: '1px solid #F0F0F0', opacity: d.is_active ? 1 : 0.5 }}>
+                <td style={{ padding: '10px 12px', fontSize: 13, fontWeight: 600 }}>{d.name}</td>
+                <td style={{ padding: '10px 12px', fontSize: 13 }}>{d.department}</td>
+                <td style={{ padding: '10px 12px', fontSize: 13 }}>{d.phone}</td>
+                <td style={{ padding: '10px 12px', fontSize: 13 }}>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 4, fontSize: 11,
+                    background: d.is_active ? '#D5F5E3' : '#F8F9FA',
+                    color: d.is_active ? '#1E8449' : 'var(--text-light)'
+                  }}>{d.is_active ? 'Active' : 'Inactive'}</span>
+                </td>
+                <td style={{ padding: '10px 12px' }}>
+                  {d.is_active && (
+                    <button onClick={() => handleDeactivate(d)}
+                      style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                      Deactivate
+                    </button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {doctors.length === 0 && (
+          <p style={{ textAlign: 'center', color: 'var(--text-light)', padding: 32 }}>No doctors yet</p>
         )}
       </div>
     </div>

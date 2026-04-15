@@ -48,6 +48,48 @@ router.post('/login', async (req, res) => {
   }
 });
 
+// Create a new doctor (admin endpoint — no auth for POC)
+router.post('/', async (req, res) => {
+  try {
+    const { name, department, phone, pin } = req.body;
+    if (!name || !department || !phone || !pin) {
+      return res.status(400).json({ error: 'name, department, phone, pin are required' });
+    }
+    if (pin.length < 4 || pin.length > 6 || !/^\d+$/.test(pin)) {
+      return res.status(400).json({ error: 'PIN must be 4-6 digits' });
+    }
+
+    const result = await pool.query(
+      `INSERT INTO doctors (name, department, phone, pin_hash)
+       VALUES ($1, $2, $3, $4)
+       RETURNING id, name, department, phone, is_active, created_at`,
+      [name, department.toUpperCase(), phone, hashPin(pin)]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') {
+      return res.status(409).json({ error: 'Phone number already registered' });
+    }
+    console.error('create doctor error:', err);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Deactivate a doctor (soft delete)
+router.post('/:id/deactivate', async (req, res) => {
+  try {
+    const result = await pool.query(
+      `UPDATE doctors SET is_active = false WHERE id = $1 RETURNING id, name, is_active`,
+      [req.params.id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'Doctor not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 // List doctors (for admin)
 router.get('/', async (req, res) => {
   try {

@@ -69,6 +69,8 @@ export const api = {
   doctorConsulted: () => apiFetch('/api/doctor/consulted'),
   doctorChangePin: (old_pin, new_pin) => apiFetch('/api/doctor/change-pin', { method: 'POST', body: JSON.stringify({ old_pin, new_pin }) }),
   listDoctors: (department) => apiFetch(`/api/doctor${department ? '?department=' + department : ''}`),
+  createDoctor: (data) => apiFetch('/api/doctor', { method: 'POST', body: JSON.stringify(data) }),
+  deactivateDoctor: (id) => apiFetch(`/api/doctor/${id}/deactivate`, { method: 'POST' }),
   allSessions: (params) => apiFetch(`/api/doctor/all-sessions?${new URLSearchParams(params || {})}`),
 
   // Mock HIS
