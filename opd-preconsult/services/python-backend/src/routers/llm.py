@@ -24,11 +24,12 @@ class InterviewResponse(BaseModel):
 
 @router.post("/interview", response_model=InterviewResponse)
 async def interview(req: InterviewRequest):
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key or api_key == "your_key_here":
+    from ..llm_client import has_llm, complete as llm_complete
+
+    if not has_llm():
         # Fallback: echo back for demo without API key
         return InterviewResponse(
-            reply=f"Thank you for sharing. Let me note that down.",
+            reply="Thank you for sharing. Let me note that down.",
             answer_complete=req.patient_message,
             triage_flag=None,
         )
@@ -66,15 +67,15 @@ async def interview(req: InterviewRequest):
         symptom_description="{symptom_description}",
     )
 
-    client = anthropic.Anthropic(api_key=api_key)
-    response = client.messages.create(
-        model="claude-sonnet-4-20250514",
-        max_tokens=1024,
-        system=system_prompt,
-        messages=[{"role": "user", "content": req.patient_message}],
-    )
-
-    reply_text = response.content[0].text
+    try:
+        reply_text = llm_complete(system_prompt, req.patient_message, max_tokens=1024)
+    except Exception as e:
+        print(f"[llm.interview] LLM call failed: {type(e).__name__}: {e}", flush=True)
+        return InterviewResponse(
+            reply="Thank you for sharing. Let me note that down.",
+            answer_complete=req.patient_message,
+            triage_flag=None,
+        )
 
     # Parse ANSWER_COMPLETE
     answer_complete = None

@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import traceback
 from datetime import datetime
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
@@ -19,6 +20,17 @@ class ReportRequest(BaseModel):
 
 @router.post("/generate")
 async def generate_report(req: ReportRequest):
+    try:
+        return await _generate_report_impl(req)
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"[report.generate] ERROR for session {req.session_id}: {type(e).__name__}: {e}", flush=True)
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"{type(e).__name__}: {str(e)}")
+
+
+async def _generate_report_impl(req: ReportRequest):
     # Gather all session data
     session = query("SELECT * FROM sessions WHERE id = %s", (req.session_id,))
     if not session:
@@ -93,18 +105,17 @@ async def generate_report(req: ReportRequest):
     }
 
     # Generate report via LLM or fallback
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if api_key and api_key != "your_key_here":
-        system_prompt = (PROMPT_DIR / "system_report.txt").read_text()
-        client = anthropic.Anthropic(api_key=api_key)
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2048,
-            system=system_prompt,
-            messages=[{"role": "user", "content": json.dumps(session_json, indent=2, default=str)}],
-        )
-        report_md = response.content[0].text
-    else:
+    from ..llm_client import has_llm, complete as llm_complete
+    report_md = None
+    if has_llm():
+        try:
+            system_prompt = (PROMPT_DIR / "system_report.txt").read_text()
+            user_content = json.dumps(session_json, indent=2, default=str)
+            report_md = llm_complete(system_prompt, user_content, max_tokens=2048)
+        except Exception as e:
+            print(f"[report] LLM call failed: {type(e).__name__}: {e}", flush=True)
+            report_md = None
+    if not report_md:
         report_md = _fallback_report(session_json)
 
     # Build FHIR bundle
