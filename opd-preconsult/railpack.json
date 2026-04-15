@@ -1,0 +1,71 @@
+{
+  "$schema": "https://schema.railpack.com",
+
+  "buildAptPackages": [
+    "tesseract-ocr",
+    "tesseract-ocr-hin",
+    "tesseract-ocr-tel"
+  ],
+
+  "steps": {
+    "frontend-install": {
+      "inputs": ["..."],
+      "commands": [
+        "cd frontend && npm install"
+      ]
+    },
+    "frontend-build": {
+      "inputs": [{ "step": "frontend-install" }],
+      "commands": [
+        "cd frontend && API_INTERNAL_URL=http://127.0.0.1:8080 npm run build"
+      ],
+      "deployOutputs": [
+        { "include": ["frontend/.next/standalone/**", "frontend/.next/static/**"] }
+      ]
+    },
+    "node-backend": {
+      "inputs": ["..."],
+      "commands": [
+        "cd services/node-backend && npm install --production"
+      ],
+      "deployOutputs": [
+        { "include": ["services/node-backend/**"] }
+      ]
+    },
+    "python-backend": {
+      "inputs": ["..."],
+      "commands": [
+        "pip install --no-cache-dir -r services/python-backend/requirements.txt"
+      ],
+      "deployOutputs": [
+        { "include": ["services/python-backend/**"] }
+      ]
+    },
+    "config": {
+      "inputs": ["..."],
+      "commands": [],
+      "deployOutputs": [
+        { "include": [
+          "db/**",
+          "railway/**"
+        ]}
+      ]
+    }
+  },
+
+  "deploy": {
+    "aptPackages": [
+      "nginx",
+      "supervisor",
+      "tesseract-ocr",
+      "tesseract-ocr-hin",
+      "tesseract-ocr-tel"
+    ],
+    "startCommand": "bash /app/railway/start.sh",
+    "variables": {
+      "NODE_ENV": "production",
+      "PORT": "8080"
+    },
+    "paths": ["/usr/local/bin", "/usr/bin"]
+  }
+}

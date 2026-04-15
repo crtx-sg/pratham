@@ -51,17 +51,11 @@ COPY --from=frontend-builder /build/frontend/.next/static ./.next/static
 # ---- DB migrations ----
 COPY db/ /app/db/
 
-# ---- Nginx config ----
-COPY railway/nginx.conf /etc/nginx/sites-available/default
-
-# ---- Supervisord config ----
-COPY railway/supervisord.conf /etc/supervisor/conf.d/app.conf
-
-# ---- Startup script ----
-COPY railway/start.sh /app/start.sh
-RUN chmod +x /app/start.sh
+# ---- Railway configs ----
+COPY railway/ /app/railway/
+RUN chmod +x /app/railway/start.sh
 
 WORKDIR /app
 EXPOSE 8080
 
-CMD ["/app/start.sh"]
+CMD ["/app/railway/start.sh"]
