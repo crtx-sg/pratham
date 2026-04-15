@@ -52,10 +52,10 @@ COPY --from=frontend-builder /build/frontend/.next/static ./.next/static
 COPY db/ /app/db/
 
 # ---- Railway configs ----
-COPY railway/ /app/railway/
-RUN chmod +x /app/railway/start.sh
+COPY deploy/ /app/deploy/
+RUN chmod +x /app/deploy/start.sh
 
 WORKDIR /app
 EXPOSE 8080
 
-CMD ["/app/railway/start.sh"]
+CMD ["/app/deploy/start.sh"]

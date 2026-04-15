@@ -1,10 +1,10 @@
 [build]
 dockerfilePath = "Dockerfile.railway"
-watchPatterns = ["services/**", "frontend/**", "db/**", "railway/**"]
+watchPatterns = ["services/**", "frontend/**", "db/**", "deploy/**"]
 
 [deploy]
-startCommand = "/app/railway/start.sh"
-healthcheckPath = "/api/session"
-healthcheckTimeout = 30
+startCommand = "/app/deploy/start.sh"
+healthcheckPath = "/healthz"
+healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5

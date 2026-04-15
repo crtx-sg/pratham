@@ -5,11 +5,11 @@ echo "=== OPD Pre-Consultation POC — Railway Startup ==="
 
 # Detect working directory (railpack puts files at /app or project root)
 APP_DIR="${APP_DIR:-/app}"
-if [ -f "$APP_DIR/railway/start.sh" ]; then
+if [ -f "$APP_DIR/deploy/start.sh" ]; then
   BASE="$APP_DIR"
-elif [ -f "/app/railway/start.sh" ]; then
+elif [ -f "/app/deploy/start.sh" ]; then
   BASE="/app"
-elif [ -f "$(pwd)/railway/start.sh" ]; then
+elif [ -f "$(pwd)/deploy/start.sh" ]; then
   BASE="$(pwd)"
 else
   BASE="/app"
@@ -83,9 +83,9 @@ fi
 # -------------------------------------------------------
 # 2. Configure nginx
 # -------------------------------------------------------
-NGINX_CONF="$BASE/railway/nginx.conf"
+NGINX_CONF="$BASE/deploy/nginx.conf"
 if [ ! -f "$NGINX_CONF" ]; then
-  NGINX_CONF="/app/railway/nginx.conf"
+  NGINX_CONF="/app/deploy/nginx.conf"
 fi
 
 # Railway sets $PORT — update nginx to listen on it
