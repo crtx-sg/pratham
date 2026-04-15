@@ -3,6 +3,10 @@ import psycopg2
 import psycopg2.extras
 
 def get_conn():
+    # Railway / Heroku style DATABASE_URL takes precedence
+    db_url = os.getenv("DATABASE_URL")
+    if db_url:
+        return psycopg2.connect(db_url)
     return psycopg2.connect(
         host=os.getenv("POSTGRES_HOST", "localhost"),
         port=int(os.getenv("POSTGRES_PORT", "5432")),

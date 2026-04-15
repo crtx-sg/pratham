@@ -20,28 +20,23 @@ echo "[startup] Base directory: $BASE"
 # -------------------------------------------------------
 # 1. Run DB migrations
 # -------------------------------------------------------
-if [ -n "$POSTGRES_HOST" ]; then
+if [ -n "$POSTGRES_HOST" ] || [ -n "$DATABASE_URL" ]; then
   echo "[startup] Running database migrations..."
-
-  # Also support Railway's DATABASE_URL format
-  if [ -z "$POSTGRES_HOST" ] && [ -n "$DATABASE_URL" ]; then
-    export POSTGRES_HOST=$(echo $DATABASE_URL | sed -n 's|.*@\([^:]*\):.*|\1|p')
-    export POSTGRES_PORT=$(echo $DATABASE_URL | sed -n 's|.*:\([0-9]*\)/.*|\1|p')
-    export POSTGRES_DB=$(echo $DATABASE_URL | sed -n 's|.*/\([^?]*\).*|\1|p')
-    export POSTGRES_USER=$(echo $DATABASE_URL | sed -n 's|.*://\([^:]*\):.*|\1|p')
-    export POSTGRES_PASSWORD=$(echo $DATABASE_URL | sed -n 's|.*://[^:]*:\([^@]*\)@.*|\1|p')
-  fi
 
   for i in $(seq 1 30); do
     if python3 -c "
 import psycopg2, os
-psycopg2.connect(
-  host=os.environ['POSTGRES_HOST'],
-  port=os.environ.get('POSTGRES_PORT','5432'),
-  dbname=os.environ.get('POSTGRES_DB','opd_preconsult'),
-  user=os.environ.get('POSTGRES_USER','opd_user'),
-  password=os.environ.get('POSTGRES_PASSWORD',''),
-).close()
+db_url = os.getenv('DATABASE_URL')
+if db_url:
+  psycopg2.connect(db_url).close()
+else:
+  psycopg2.connect(
+    host=os.environ['POSTGRES_HOST'],
+    port=os.environ.get('POSTGRES_PORT','5432'),
+    dbname=os.environ.get('POSTGRES_DB','opd_preconsult'),
+    user=os.environ.get('POSTGRES_USER','opd_user'),
+    password=os.environ.get('POSTGRES_PASSWORD',''),
+  ).close()
 print('connected')
 " 2>/dev/null; then
       echo "[startup] PostgreSQL is ready"
@@ -61,13 +56,17 @@ print('connected')
     echo "[startup] Running migration: $(basename $f)"
     python3 -c "
 import psycopg2, os, sys
-conn = psycopg2.connect(
-  host=os.environ['POSTGRES_HOST'],
-  port=os.environ.get('POSTGRES_PORT','5432'),
-  dbname=os.environ.get('POSTGRES_DB','opd_preconsult'),
-  user=os.environ.get('POSTGRES_USER','opd_user'),
-  password=os.environ.get('POSTGRES_PASSWORD',''),
-)
+db_url = os.getenv('DATABASE_URL')
+if db_url:
+  conn = psycopg2.connect(db_url)
+else:
+  conn = psycopg2.connect(
+    host=os.environ['POSTGRES_HOST'],
+    port=os.environ.get('POSTGRES_PORT','5432'),
+    dbname=os.environ.get('POSTGRES_DB','opd_preconsult'),
+    user=os.environ.get('POSTGRES_USER','opd_user'),
+    password=os.environ.get('POSTGRES_PASSWORD',''),
+  )
 conn.autocommit = True
 with open(sys.argv[1]) as f:
   conn.cursor().execute(f.read())
@@ -77,7 +76,7 @@ print(f'  OK: {sys.argv[1]}')
   done
   echo "[startup] Migrations complete"
 else
-  echo "[startup] WARNING: POSTGRES_HOST not set, skipping migrations"
+  echo "[startup] WARNING: POSTGRES_HOST / DATABASE_URL not set, skipping migrations"
 fi
 
 # -------------------------------------------------------
