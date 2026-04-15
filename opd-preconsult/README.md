@@ -12,12 +12,12 @@ Indian OPDs see 2,000–15,000 patients per day. Doctors get under 1 minute per 
 |-------|------|
 | Frontend | Next.js 14 (App Router), React 18, mobile-first PWA |
 | Node backend | Express, PostgreSQL (pg), JWT auth |
-| Python backend | FastAPI, Anthropic Claude SDK, Tesseract OCR, psycopg2 |
+| Python backend | FastAPI, Claude / Gemini SDK, Tesseract OCR, psycopg2 |
 | Database | PostgreSQL 16 |
 | Cache | Redis 7 |
 | Object storage | MinIO (S3-compatible) |
 | Gateway | Nginx reverse proxy |
-| Orchestration | Docker Compose |
+| Orchestration | Docker Compose (local) / single-container Dockerfile (Railway) |
 | Languages | English, Hindi, Telugu |
 
 ## Architecture
@@ -56,14 +56,15 @@ opd-preconsult/
 │   ├── node-backend/            # Express: session, questionnaire, doctor, HIS
 │   └── python-backend/          # FastAPI: LLM, triage, report, OCR
 ├── frontend/                    # Next.js app with /patient, /doctor, /his routes
-├── railway/                     # Railway deploy scripts (nginx + supervisord + start.sh)
+├── deploy/                      # Railway deploy scripts (nginx + supervisord + start.sh)
+├── start.sh                     # Railway entry point (delegates to deploy/start.sh)
 └── scripts/generate-qr.js       # Helper to generate QR payloads
 ```
 
 ## Prerequisites
 
 - Docker and Docker Compose
-- (Optional) Anthropic API key for LLM-generated reports — the system has a fallback that works without it
+- (Optional) Gemini or Anthropic API key for LLM-generated reports — the system has a rule-based fallback that works without it
 
 ## Setup (Local Docker Compose)
 
@@ -74,8 +75,9 @@ cd opd-preconsult
 # Copy env template and edit
 cp .env.example .env
 
-# Set your Anthropic API key (optional — fallback works without it)
-# ANTHROPIC_API_KEY=sk-ant-...
+# Set your LLM API key in .env (optional — fallback works without it)
+# GEMINI_API_KEY=AIzaSy...        (preferred)
+# or ANTHROPIC_API_KEY=sk-ant-...
 
 # Build and start all services
 docker compose up --build
@@ -154,7 +156,7 @@ node scripts/generate-qr.js GEN
 - **Branching logic**: Answer YES to chest pain → follow-up on radiation → RED triage
 - **OCR pipeline**: Tesseract with English/Hindi/Telugu models, extracts meds + lab values, classifies doc type
 - **Triage engine**: Rule-based RED/AMBER/GREEN evaluation
-- **LLM reports**: Claude integration merges questionnaire + OCR + vitals, with fallback for no API key
+- **LLM reports**: Claude or Gemini integration merges questionnaire + OCR + vitals, with rule-based fallback when no API key is set
 - **FHIR R4 output**: Patient, Observation, Condition, MedicationStatement resources
 - **Doctor workflow**: PIN login, department-scoped queue, auto-assign on click, unassign/reassign
 - **HIS dashboard**: Per-doctor stats, patient filtering, reassignment
@@ -188,23 +190,32 @@ The project includes Railway-ready configs — a single-container build that run
 **Files:**
 - `Dockerfile.railway` — multi-stage build
 - `railway.toml` — deploy config
-- `railpack.json` — alternate build config
-- `railway/start.sh` — startup script (runs migrations + supervisord)
-- `railway/nginx.conf` — reverse proxy
-- `railway/supervisord.conf` — process manager
+- `railpack.json` — alternate build config (if using Railpack instead of Dockerfile)
+- `start.sh` — root entrypoint shim
+- `deploy/start.sh` — main startup script (runs migrations, sets up nginx, starts supervisord)
+- `deploy/nginx.conf` — reverse proxy (listens on `$PORT`)
+- `deploy/supervisord.conf` — process manager template
 
 **Steps:**
-1. Create Railway project
-2. Add PostgreSQL and Redis add-ons
-3. Set env vars: `POSTGRES_HOST`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, etc. (reference add-on vars like `${{Postgres.PGHOST}}`)
-4. Set `JWT_SECRET` (random 256-bit string), `ANTHROPIC_API_KEY` (optional)
-5. Deploy — Railway builds from `Dockerfile.railway`, runs `start.sh`
+1. Push code to GitHub, create Railway project from the repo
+2. Set **Root Directory** = `opd-preconsult`, **Dockerfile Path** = `Dockerfile.railway`, leave Build Command empty
+3. Add PostgreSQL plugin (Redis is optional)
+4. Set env vars in your app service (Variables → Raw Editor):
+   ```
+   DATABASE_URL=${{Postgres.DATABASE_URL}}
+   JWT_SECRET=<random-64-char-string>
+   GEMINI_API_KEY=AIzaSy...   # or ANTHROPIC_API_KEY=sk-ant-...
+   ```
+5. Set health check path = `/healthz` and timeout = 300s in Service Settings
+6. Deploy — Railway builds, runs migrations, starts all services on a single public port
+
+The app auto-detects `DATABASE_URL` (Railway/Heroku style) or individual `POSTGRES_*` vars.
 
 ## Out of Scope for This POC
 
 - Live ABHA/ABDM API calls (mocked)
 - Real hospital LIS integration (upload only)
-- Locally-hosted LLM (uses Claude API)
+- Locally-hosted LLM (uses Claude or Gemini API)
 - IoT Bluetooth vitals devices (manual entry)
 - Offline PWA / Service Worker sync
 - Full 22-language support
@@ -218,13 +229,20 @@ See `.env.example`. Key ones:
 
 | Variable | Purpose |
 |----------|---------|
-| `POSTGRES_*` | Database connection |
-| `REDIS_URL` | Cache |
-| `MINIO_*` | Object storage |
+| `DATABASE_URL` | Railway/Heroku-style DB URL (takes precedence if set) |
+| `POSTGRES_*` | Database connection (used if `DATABASE_URL` not set) |
+| `REDIS_URL` | Cache (optional) |
+| `MINIO_*` | Object storage (optional, not currently used) |
 | `JWT_SECRET` | Auth token signing |
-| `ANTHROPIC_API_KEY` | Claude LLM (optional — fallback available) |
+| `GEMINI_API_KEY` | Google Gemini — preferred LLM if set |
+| `GEMINI_MODEL` | Override default `gemini-2.0-flash-exp` |
+| `ANTHROPIC_API_KEY` | Claude LLM — used if Gemini key not set |
+| `ANTHROPIC_MODEL` | Override default `claude-sonnet-4-20250514` |
 | `TWILIO_*` | WhatsApp/SMS (optional) |
 | `DEMO_HOSPITAL_ID` | Default hospital for QR codes |
+| `PORT` | Port nginx listens on (Railway sets this automatically) |
+
+**LLM provider selection:** If `GEMINI_API_KEY` is set, Gemini is used. Otherwise, if `ANTHROPIC_API_KEY` is set, Claude is used. If neither is set, a rule-based fallback generates the report.
 
 ## License
 
