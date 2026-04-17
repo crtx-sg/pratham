@@ -3,6 +3,7 @@ import { useState, useEffect, Suspense } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { api, setToken } from '../lib/api';
 import { t } from '../lib/i18n';
+import QRScanner from '../components/QRScanner';
 
 function HomeContent() {
   const router = useRouter();
@@ -10,6 +11,7 @@ function HomeContent() {
   const [lang, setLang] = useState('en');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [showScanner, setShowScanner] = useState(false);
 
   useEffect(() => {
     const qr = searchParams.get('qr');
@@ -17,6 +19,7 @@ function HomeContent() {
   }, [searchParams]);
 
   async function handleQR(payload) {
+    setShowScanner(false);
     setLoading(true);
     setError('');
     try {
@@ -36,6 +39,10 @@ function HomeContent() {
 
   return (
     <div className="screen">
+      {showScanner && (
+        <QRScanner onScan={handleQR} onClose={() => setShowScanner(false)} />
+      )}
+
       <div className="card" style={{ justifyContent: 'center', alignItems: 'center', gap: 24, textAlign: 'center' }}>
         <div style={{ fontSize: 48 }}>🏥</div>
         <h1 style={{ fontSize: 24, color: 'var(--primary)' }}>{t('welcome', lang)}</h1>
@@ -53,12 +60,25 @@ function HomeContent() {
           ))}
         </div>
 
-        <div style={{ width: '100%', marginTop: 16 }}>
-          <p style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 8 }}>Demo: enter QR payload</p>
+        {/* Camera scan button — primary CTA */}
+        <button
+          className="btn btn-primary"
+          style={{ fontSize: 18, padding: '16px 24px', gap: 8, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={() => setShowScanner(true)}
+          disabled={loading}
+        >
+          📷 {lang === 'hi' ? 'QR कोड स्कैन करें' : lang === 'te' ? 'QR కోడ్ స్కాన్ చేయండి' : 'Scan QR Code'}
+        </button>
+
+        {/* Manual entry for demo/fallback */}
+        <details style={{ width: '100%' }}>
+          <summary style={{ fontSize: 12, color: 'var(--text-light)', cursor: 'pointer', marginBottom: 8 }}>
+            Enter QR code manually
+          </summary>
           <input className="input" placeholder="Base64 QR payload" id="qr-input" />
           <button
-            className="btn btn-primary"
-            style={{ marginTop: 8 }}
+            className="btn btn-outline"
+            style={{ marginTop: 8, fontSize: 14 }}
             disabled={loading}
             onClick={() => {
               const val = document.getElementById('qr-input').value;
@@ -67,7 +87,7 @@ function HomeContent() {
           >
             {loading ? 'Loading...' : 'Start Session'}
           </button>
-        </div>
+        </details>
 
         {error && <p style={{ color: 'var(--red)', fontSize: 14 }}>{error}</p>}
       </div>

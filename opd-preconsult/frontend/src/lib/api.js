@@ -31,6 +31,12 @@ export const api = {
   submitAnswer: (data) => apiFetch('/api/q/answer', { method: 'POST', body: JSON.stringify(data) }),
   getAnswers: (sessionId) => apiFetch(`/api/q/answers/${sessionId}`),
 
+  // Admin — Questionnaire management
+  getQuestions: (department) => apiFetch(`/api/admin/questions/${department}`),
+  createQuestion: (data) => apiFetch('/api/admin/questions', { method: 'POST', body: JSON.stringify(data) }),
+  updateQuestion: (id, data) => apiFetch(`/api/admin/questions/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteQuestion: (id) => apiFetch(`/api/admin/questions/${id}`, { method: 'DELETE' }),
+
   // Vitals
   submitVitals: (sessionId, data) => apiFetch(`/api/vitals/${sessionId}`, { method: 'POST', body: JSON.stringify(data) }),
   getVitals: (sessionId) => apiFetch(`/api/vitals/${sessionId}`),

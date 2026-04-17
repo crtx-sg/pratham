@@ -102,11 +102,16 @@ export default function HISPage() {
           <button className={`btn ${tab === 'doctors' ? 'btn-primary' : 'btn-outline'}`}
             style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
             onClick={() => setTab('doctors')}>Manage Doctors</button>
+          <button className={`btn ${tab === 'questions' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={() => setTab('questions')}>Questionnaires</button>
         </div>
       </div>
 
       {tab === 'doctors' ? (
         <DoctorsManager doctors={doctors} onChange={loadDoctors} />
+      ) : tab === 'questions' ? (
+        <QuestionsManager />
       ) : (<>
 
       {/* Doctor Summary Cards */}
@@ -384,6 +389,329 @@ function DoctorsManager({ doctors, onChange }) {
         </table>
         {doctors.length === 0 && (
           <p style={{ textAlign: 'center', color: 'var(--text-light)', padding: 32 }}>No doctors yet</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+const EMPTY_Q = {
+  id: '', department: 'CARD', text_en: '', text_hi: '', text_te: '',
+  q_type: 'BOOLEAN', options_json: null, required: true,
+  triage_flag: '', triage_answer: '', next_default: '', next_rules: [],
+  sort_order: 0,
+};
+
+const Q_TYPES = ['BOOLEAN', 'SINGLE_SELECT', 'MULTI_SELECT', 'FREE_TEXT', 'NUMERIC', 'TERMINAL'];
+
+function QuestionsManager() {
+  const [dept, setDept] = useState('CARD');
+  const [questions, setQuestions] = useState([]);
+  const [editing, setEditing] = useState(null); // null = list view, object = form
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => { loadQuestions(); }, [dept]);
+
+  async function loadQuestions() {
+    try { setQuestions(await api.getQuestions(dept)); } catch {}
+  }
+
+  function startNew() {
+    setEditing({ ...EMPTY_Q, department: dept, sort_order: questions.length + 1 });
+    setError(''); setSuccess('');
+  }
+
+  function startEdit(q) {
+    setEditing({
+      ...q,
+      triage_flag: q.triage_flag || '',
+      triage_answer: q.triage_answer || '',
+      next_default: q.next_default || '',
+      next_rules: q.next_rules || [],
+      options_json: q.options_json || null,
+    });
+    setError(''); setSuccess('');
+  }
+
+  async function handleSave(e) {
+    e.preventDefault();
+    setError(''); setSuccess('');
+    if (!editing.id || !editing.text_en) { setError('ID and English text required'); return; }
+
+    setSaving(true);
+    try {
+      const data = {
+        ...editing,
+        triage_flag: editing.triage_flag || null,
+        triage_answer: editing.triage_answer || null,
+        next_default: editing.next_default || null,
+        next_rules: editing.next_rules?.length ? editing.next_rules : null,
+        options_json: editing.options_json?.length ? editing.options_json : null,
+      };
+
+      const existing = questions.find(q => q.id === editing.id);
+      if (existing) {
+        await api.updateQuestion(editing.id, data);
+        setSuccess('Question updated');
+      } else {
+        await api.createQuestion(data);
+        setSuccess('Question created');
+      }
+      loadQuestions();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm(`Delete question "${id}"? This may break the DAG flow.`)) return;
+    try {
+      await api.deleteQuestion(id);
+      loadQuestions();
+      if (editing?.id === id) setEditing(null);
+    } catch (err) {
+      alert('Failed: ' + err.message);
+    }
+  }
+
+  // Options editor helpers
+  function setOptions(opts) {
+    setEditing(prev => ({ ...prev, options_json: opts }));
+  }
+  function addOption() {
+    setOptions([...(editing.options_json || []), { value: '', label_en: '', label_hi: '', label_te: '' }]);
+  }
+  function removeOption(idx) {
+    setOptions((editing.options_json || []).filter((_, i) => i !== idx));
+  }
+  function updateOption(idx, field, val) {
+    const opts = [...(editing.options_json || [])];
+    opts[idx] = { ...opts[idx], [field]: val };
+    setOptions(opts);
+  }
+
+  // Next rules editor helpers
+  function addRule() {
+    setEditing(prev => ({ ...prev, next_rules: [...(prev.next_rules || []), { if_answer: '', go_to: '' }] }));
+  }
+  function removeRule(idx) {
+    setEditing(prev => ({ ...prev, next_rules: (prev.next_rules || []).filter((_, i) => i !== idx) }));
+  }
+  function updateRule(idx, field, val) {
+    setEditing(prev => {
+      const rules = [...(prev.next_rules || [])];
+      rules[idx] = { ...rules[idx], [field]: val };
+      return { ...prev, next_rules: rules };
+    });
+  }
+
+  const allIds = questions.map(q => q.id);
+
+  return (
+    <div style={{ display: 'flex', gap: 16 }}>
+      {/* Left: question list */}
+      <div style={{ width: 380, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <select className="input" style={{ width: 160 }} value={dept} onChange={e => setDept(e.target.value)}>
+            <option value="CARD">Cardiology</option>
+            <option value="GEN">General Medicine</option>
+          </select>
+          <button className="btn btn-primary" style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={startNew}>+ Add Question</button>
+        </div>
+
+        <p style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 8 }}>{questions.length} questions (sorted by flow order)</p>
+
+        {questions.map((q, idx) => (
+          <div key={q.id} onClick={() => startEdit(q)}
+            style={{
+              background: editing?.id === q.id ? '#EBF5FB' : '#fff',
+              border: editing?.id === q.id ? '2px solid var(--secondary)' : '1px solid #E0E0E0',
+              borderRadius: 10, padding: 12, marginBottom: 6, cursor: 'pointer',
+            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 11, color: 'var(--text-light)', minWidth: 24 }}>{q.sort_order}</span>
+              <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{q.id}</span>
+              <span style={{ fontSize: 10, background: '#F0F0F0', padding: '2px 6px', borderRadius: 4 }}>{q.q_type}</span>
+              {q.triage_flag && (
+                <span style={{ fontSize: 10, background: q.triage_flag === 'RED' ? 'var(--red)' : 'var(--amber)', color: '#fff', padding: '2px 6px', borderRadius: 4 }}>{q.triage_flag}</span>
+              )}
+            </div>
+            <p style={{ fontSize: 12, color: 'var(--text-light)', marginTop: 4, lineHeight: 1.3 }}>{q.text_en}</p>
+            {q.next_default && <p style={{ fontSize: 10, color: 'var(--secondary)', marginTop: 2 }}>next: {q.next_default}</p>}
+          </div>
+        ))}
+      </div>
+
+      {/* Right: editor form */}
+      <div style={{ flex: 1, background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        {!editing ? (
+          <p style={{ color: 'var(--text-light)', textAlign: 'center', marginTop: 40 }}>Select a question to edit, or click "+ Add Question"</p>
+        ) : (
+          <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <h3 style={{ fontSize: 16, color: 'var(--primary)', flex: 1 }}>
+                {questions.find(q => q.id === editing.id) ? 'Edit Question' : 'New Question'}
+              </h3>
+              <button type="button" onClick={() => setEditing(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
+            </div>
+
+            {/* ID + Department */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Question ID *</label>
+                <input className="input" required value={editing.id} placeholder="q_my_question"
+                  onChange={e => setEditing({ ...editing, id: e.target.value })}
+                  disabled={!!questions.find(q => q.id === editing.id)} />
+              </div>
+              <div style={{ width: 120 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Sort Order</label>
+                <input className="input" type="number" value={editing.sort_order}
+                  onChange={e => setEditing({ ...editing, sort_order: parseInt(e.target.value) || 0 })} />
+              </div>
+            </div>
+
+            {/* Text fields */}
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Question text (English) *</label>
+              <input className="input" required value={editing.text_en}
+                onChange={e => setEditing({ ...editing, text_en: e.target.value })} />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Hindi</label>
+                <input className="input" value={editing.text_hi || ''}
+                  onChange={e => setEditing({ ...editing, text_hi: e.target.value })} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Telugu</label>
+                <input className="input" value={editing.text_te || ''}
+                  onChange={e => setEditing({ ...editing, text_te: e.target.value })} />
+              </div>
+            </div>
+
+            {/* Type */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Question Type *</label>
+                <select className="input" value={editing.q_type}
+                  onChange={e => setEditing({ ...editing, q_type: e.target.value })}>
+                  {Q_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </div>
+              <div style={{ width: 100 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Required</label>
+                <select className="input" value={editing.required ? 'true' : 'false'}
+                  onChange={e => setEditing({ ...editing, required: e.target.value === 'true' })}>
+                  <option value="true">Yes</option>
+                  <option value="false">No</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Options (for SELECT types) */}
+            {(editing.q_type === 'SINGLE_SELECT' || editing.q_type === 'MULTI_SELECT') && (
+              <div style={{ background: '#F8F9FA', borderRadius: 8, padding: 12 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, fontWeight: 600 }}>Options</label>
+                  <button type="button" onClick={addOption}
+                    style={{ background: 'var(--secondary)', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>
+                    + Add
+                  </button>
+                </div>
+                {(editing.options_json || []).map((opt, i) => (
+                  <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                    <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} value={opt.value}
+                      onChange={e => updateOption(i, 'value', e.target.value)} placeholder="value" />
+                    <input className="input" style={{ flex: 2, minHeight: 32, fontSize: 12 }} value={opt.label_en}
+                      onChange={e => updateOption(i, 'label_en', e.target.value)} placeholder="English label" />
+                    <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} value={opt.label_hi || ''}
+                      onChange={e => updateOption(i, 'label_hi', e.target.value)} placeholder="Hindi" />
+                    <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} value={opt.label_te || ''}
+                      onChange={e => updateOption(i, 'label_te', e.target.value)} placeholder="Telugu" />
+                    <button type="button" onClick={() => removeOption(i)}
+                      style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Triage */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Triage Flag (if answer triggers)</label>
+                <select className="input" value={editing.triage_flag || ''}
+                  onChange={e => setEditing({ ...editing, triage_flag: e.target.value })}>
+                  <option value="">None</option>
+                  <option value="RED">RED</option>
+                  <option value="AMBER">AMBER</option>
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Trigger answer value</label>
+                <input className="input" value={editing.triage_answer || ''}
+                  onChange={e => setEditing({ ...editing, triage_answer: e.target.value })} placeholder="e.g. yes" />
+              </div>
+            </div>
+
+            {/* Navigation */}
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Default next question</label>
+              <select className="input" value={editing.next_default || ''}
+                onChange={e => setEditing({ ...editing, next_default: e.target.value })}>
+                <option value="">None (terminal)</option>
+                {allIds.filter(id => id !== editing.id).map(id => <option key={id} value={id}>{id}</option>)}
+              </select>
+            </div>
+
+            {/* Conditional next rules */}
+            <div style={{ background: '#F8F9FA', borderRadius: 8, padding: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                <label style={{ fontSize: 12, fontWeight: 600 }}>Branching Rules</label>
+                <button type="button" onClick={addRule}
+                  style={{ background: 'var(--secondary)', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>
+                  + Add Rule
+                </button>
+              </div>
+              <p style={{ fontSize: 10, color: 'var(--text-light)', marginBottom: 6 }}>If answer equals X, go to question Y (overrides default next)</p>
+              {(editing.next_rules || []).map((rule, i) => (
+                <div key={i} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                  <span style={{ fontSize: 11, color: 'var(--text-light)' }}>If answer =</span>
+                  <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} value={rule.if_answer}
+                    onChange={e => updateRule(i, 'if_answer', e.target.value)} placeholder="yes" />
+                  <span style={{ fontSize: 11, color: 'var(--text-light)' }}>go to</span>
+                  <select className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} value={rule.go_to}
+                    onChange={e => updateRule(i, 'go_to', e.target.value)}>
+                    <option value="">--</option>
+                    {allIds.filter(id => id !== editing.id).map(id => <option key={id} value={id}>{id}</option>)}
+                  </select>
+                  <button type="button" onClick={() => removeRule(i)}
+                    style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+              ))}
+            </div>
+
+            {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
+            {success && <p style={{ color: 'var(--green)', fontSize: 13 }}>{success}</p>}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary" type="submit" disabled={saving} style={{ flex: 1 }}>
+                {saving ? 'Saving...' : 'Save Question'}
+              </button>
+              {questions.find(q => q.id === editing.id) && (
+                <button type="button" className="btn btn-outline" onClick={() => handleDelete(editing.id)}
+                  style={{ borderColor: 'var(--red)', color: 'var(--red)', width: 'auto', padding: '0 16px' }}>
+                  Delete
+                </button>
+              )}
+            </div>
+          </form>
         )}
       </div>
     </div>
