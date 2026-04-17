@@ -31,6 +31,11 @@ export const api = {
   submitAnswer: (data) => apiFetch('/api/q/answer', { method: 'POST', body: JSON.stringify(data) }),
   getAnswers: (sessionId) => apiFetch(`/api/q/answers/${sessionId}`),
 
+  // Admin — Departments
+  getDepartments: () => apiFetch('/api/admin/departments'),
+  createDepartment: (data) => apiFetch('/api/admin/departments', { method: 'POST', body: JSON.stringify(data) }),
+  deleteDepartment: (code) => apiFetch(`/api/admin/departments/${code}`, { method: 'DELETE' }),
+
   // Admin — Questionnaire management
   getQuestions: (department) => apiFetch(`/api/admin/questions/${department}`),
   createQuestion: (data) => apiFetch('/api/admin/questions', { method: 'POST', body: JSON.stringify(data) }),

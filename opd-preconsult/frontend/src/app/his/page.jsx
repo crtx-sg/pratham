@@ -5,9 +5,10 @@ import TriageBadge from '../../components/TriageBadge';
 import ReactMarkdown from 'react-markdown';
 
 export default function HISPage() {
-  const [tab, setTab] = useState('sessions'); // sessions | doctors
+  const [tab, setTab] = useState('sessions');
   const [sessions, setSessions] = useState([]);
   const [doctors, setDoctors] = useState([]);
+  const [depts, setDepts] = useState([]);
   const [selected, setSelected] = useState(null);
   const [report, setReport] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -16,12 +17,17 @@ export default function HISPage() {
   useEffect(() => {
     loadData();
     loadDoctors();
+    loadDepts();
     const interval = setInterval(loadData, 15000);
     return () => clearInterval(interval);
   }, []);
 
   async function loadDoctors() {
     try { setDoctors(await api.listDoctors()); } catch {}
+  }
+
+  async function loadDepts() {
+    try { setDepts(await api.getDepartments()); } catch {}
   }
 
   useEffect(() => { loadData(); }, [filters]);
@@ -105,13 +111,18 @@ export default function HISPage() {
           <button className={`btn ${tab === 'questions' ? 'btn-primary' : 'btn-outline'}`}
             style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
             onClick={() => setTab('questions')}>Questionnaires</button>
+          <button className={`btn ${tab === 'departments' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={() => setTab('departments')}>Departments</button>
         </div>
       </div>
 
       {tab === 'doctors' ? (
-        <DoctorsManager doctors={doctors} onChange={loadDoctors} />
+        <DoctorsManager doctors={doctors} depts={depts} onChange={loadDoctors} />
       ) : tab === 'questions' ? (
-        <QuestionsManager />
+        <QuestionsManager depts={depts} />
+      ) : tab === 'departments' ? (
+        <DepartmentsManager depts={depts} onChange={loadDepts} />
       ) : (<>
 
       {/* Doctor Summary Cards */}
@@ -142,7 +153,7 @@ export default function HISPage() {
         <select className="input" style={{ width: 160 }} value={filters.department}
           onChange={e => setFilters(f => ({ ...f, department: e.target.value }))}>
           <option value="">All Departments</option>
-          {departments.map(d => <option key={d} value={d}>{d}</option>)}
+          {depts.map(d => <option key={d.code} value={d.code}>{d.name} ({d.code})</option>)}
         </select>
         <select className="input" style={{ width: 200 }} value={filters.doctor_id}
           onChange={e => setFilters(f => ({ ...f, doctor_id: e.target.value }))}>
@@ -259,7 +270,7 @@ export default function HISPage() {
 }
 
 
-function DoctorsManager({ doctors, onChange }) {
+function DoctorsManager({ doctors, depts = [], onChange }) {
   const [form, setForm] = useState({ name: '', department: 'CARD', phone: '', pin: '' });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -317,8 +328,9 @@ function DoctorsManager({ doctors, onChange }) {
             <label style={{ fontSize: 12, color: 'var(--text-light)' }}>Department *</label>
             <select className="input" value={form.department}
               onChange={e => setForm({ ...form, department: e.target.value })}>
-              <option value="CARD">Cardiology (CARD)</option>
-              <option value="GEN">General Medicine (GEN)</option>
+              {depts.filter(d => d.is_active).map(d => (
+                <option key={d.code} value={d.code}>{d.name} ({d.code})</option>
+              ))}
             </select>
           </div>
 
@@ -405,7 +417,7 @@ const EMPTY_Q = {
 
 const Q_TYPES = ['BOOLEAN', 'SINGLE_SELECT', 'MULTI_SELECT', 'FREE_TEXT', 'NUMERIC', 'TERMINAL'];
 
-function QuestionsManager() {
+function QuestionsManager({ depts = [] }) {
   const [dept, setDept] = useState('CARD');
   const [questions, setQuestions] = useState([]);
   const [editing, setEditing] = useState(null); // null = list view, object = form
@@ -518,8 +530,9 @@ function QuestionsManager() {
       <div style={{ width: 380, flexShrink: 0 }}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
           <select className="input" style={{ width: 160 }} value={dept} onChange={e => setDept(e.target.value)}>
-            <option value="CARD">Cardiology</option>
-            <option value="GEN">General Medicine</option>
+            {depts.filter(d => d.is_active).map(d => (
+              <option key={d.code} value={d.code}>{d.name}</option>
+            ))}
           </select>
           <button className="btn btn-primary" style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
             onClick={startNew}>+ Add Question</button>
@@ -712,6 +725,118 @@ function QuestionsManager() {
               )}
             </div>
           </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function DepartmentsManager({ depts, onChange }) {
+  const [form, setForm] = useState({ code: '', name: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setError(''); setSuccess('');
+    if (!form.code || !form.name) { setError('Code and name required'); return; }
+    setSaving(true);
+    try {
+      const created = await api.createDepartment(form);
+      setSuccess(`Department "${created.name}" (${created.code}) added`);
+      setForm({ code: '', name: '' });
+      onChange();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(code) {
+    if (!confirm(`Delete department "${code}"? Only possible if no doctors, patients, or questions are linked to it.`)) return;
+    try {
+      await api.deleteDepartment(code);
+      onChange();
+    } catch (err) {
+      alert(err.message);
+    }
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 16 }}>
+      {/* Add form */}
+      <div style={{ width: 360, flexShrink: 0, background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', height: 'fit-content' }}>
+        <h3 style={{ fontSize: 16, marginBottom: 16, color: 'var(--primary)' }}>Add New Department</h3>
+        <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-light)' }}>Code * (e.g. ORTHO, ENT, DERM)</label>
+            <input className="input" required value={form.code}
+              onChange={e => setForm({ ...form, code: e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, '') })}
+              placeholder="ORTHO" maxLength={16} style={{ textTransform: 'uppercase' }} />
+          </div>
+          <div>
+            <label style={{ fontSize: 12, color: 'var(--text-light)' }}>Display Name *</label>
+            <input className="input" required value={form.name}
+              onChange={e => setForm({ ...form, name: e.target.value })}
+              placeholder="Orthopaedics" />
+          </div>
+          {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
+          {success && <p style={{ color: 'var(--green)', fontSize: 13 }}>{success}</p>}
+          <button className="btn btn-primary" type="submit" disabled={saving}>
+            {saving ? 'Adding...' : 'Add Department'}
+          </button>
+        </form>
+        <div style={{ marginTop: 20, padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: 12, color: 'var(--text-light)', lineHeight: 1.6 }}>
+          <p><strong>After adding a department:</strong></p>
+          <p>1. Go to <strong>Questionnaires</strong> tab to add questions for it</p>
+          <p>2. Go to <strong>Manage Doctors</strong> tab to assign doctors to it</p>
+          <p>3. Use the <strong>Copy QR</strong> button to generate a patient entry QR payload</p>
+        </div>
+      </div>
+
+      {/* Department list */}
+      <div style={{ flex: 1 }}>
+        <h3 style={{ fontSize: 16, marginBottom: 12, color: 'var(--primary)' }}>Departments ({depts.length})</h3>
+        <table style={{ width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 12, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+          <thead>
+            <tr style={{ background: 'var(--primary)', color: '#fff', fontSize: 13 }}>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Code</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Name</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>QR Payload</th>
+              <th style={{ padding: '10px 12px', textAlign: 'left' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {depts.map(d => {
+              const qr = typeof btoa !== 'undefined'
+                ? btoa(JSON.stringify({ hospital_id: 'demo_hospital_01', department: d.code, queue_slot: 1 }))
+                : '';
+              return (
+                <tr key={d.code} style={{ borderBottom: '1px solid #F0F0F0' }}>
+                  <td style={{ padding: '10px 12px', fontSize: 14, fontWeight: 600 }}>{d.code}</td>
+                  <td style={{ padding: '10px 12px', fontSize: 14 }}>{d.name}</td>
+                  <td style={{ padding: '10px 12px' }}>
+                    <button onClick={() => { navigator.clipboard?.writeText(qr); alert('QR payload copied to clipboard!\n\nUse: /?qr=' + qr); }}
+                      style={{ background: 'var(--secondary)', color: '#fff', border: 'none', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 11 }}>
+                      Copy QR
+                    </button>
+                  </td>
+                  <td style={{ padding: '10px 12px' }}>
+                    <button onClick={() => handleDelete(d.code)}
+                      style={{ background: 'none', border: '1px solid var(--red)', color: 'var(--red)', borderRadius: 6, padding: '4px 10px', cursor: 'pointer', fontSize: 12 }}>
+                      Delete
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        {depts.length === 0 && (
+          <p style={{ textAlign: 'center', color: 'var(--text-light)', padding: 32 }}>No departments yet</p>
         )}
       </div>
     </div>

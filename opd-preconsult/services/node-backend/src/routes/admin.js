@@ -3,6 +3,70 @@ const pool = require('../models/db');
 
 const router = Router();
 
+// ── Departments ──
+
+// List departments
+router.get('/departments', async (req, res) => {
+  try {
+    const result = await pool.query('SELECT * FROM departments ORDER BY name');
+    res.json(result.rows);
+  } catch (err) {
+    // Table may not exist yet — return hardcoded defaults
+    res.json([
+      { code: 'CARD', name: 'Cardiology', is_active: true },
+      { code: 'GEN', name: 'General Medicine', is_active: true },
+    ]);
+  }
+});
+
+// Create department
+router.post('/departments', async (req, res) => {
+  try {
+    const { code, name } = req.body;
+    if (!code || !name) return res.status(400).json({ error: 'code and name required' });
+    const cleanCode = code.toUpperCase().replace(/[^A-Z0-9_]/g, '');
+    if (cleanCode.length < 2) return res.status(400).json({ error: 'Code must be at least 2 characters (letters/numbers only)' });
+
+    const result = await pool.query(
+      'INSERT INTO departments (code, name) VALUES ($1, $2) RETURNING *',
+      [cleanCode, name]
+    );
+    res.json(result.rows[0]);
+  } catch (err) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Department code already exists' });
+    console.error('create department error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Delete department (only if no doctors, sessions, or questions reference it)
+router.delete('/departments/:code', async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase();
+
+    // Check for references
+    const doctors = await pool.query('SELECT COUNT(*) FROM doctors WHERE department = $1', [code]);
+    if (parseInt(doctors.rows[0].count) > 0) {
+      return res.status(409).json({ error: `Cannot delete: ${doctors.rows[0].count} doctor(s) in this department` });
+    }
+    const sessions = await pool.query('SELECT COUNT(*) FROM sessions WHERE department = $1', [code]);
+    if (parseInt(sessions.rows[0].count) > 0) {
+      return res.status(409).json({ error: `Cannot delete: ${sessions.rows[0].count} session(s) in this department` });
+    }
+    const questions = await pool.query('SELECT COUNT(*) FROM questionnaire_nodes WHERE department = $1', [code]);
+    if (parseInt(questions.rows[0].count) > 0) {
+      return res.status(409).json({ error: `Cannot delete: ${questions.rows[0].count} question(s) in this department. Delete them first.` });
+    }
+
+    await pool.query('DELETE FROM departments WHERE code = $1', [code]);
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Questions ──
+
 // List questions for department
 router.get('/questions/:department', async (req, res) => {
   try {
