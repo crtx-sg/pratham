@@ -1,6 +1,7 @@
 # =============================================================
 # OPD Pre-Consultation POC — Single-container Railway deployment
 # Runs: nginx + node-backend + python-backend + next.js frontend
+# Build: v2 — includes protocols, prescriptions, scribe, analytics
 # =============================================================
 
 # ---- Stage 1: Build frontend ----
