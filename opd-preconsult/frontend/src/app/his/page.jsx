@@ -114,6 +114,12 @@ export default function HISPage() {
           <button className={`btn ${tab === 'departments' ? 'btn-primary' : 'btn-outline'}`}
             style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
             onClick={() => setTab('departments')}>Departments</button>
+          <button className={`btn ${tab === 'protocols' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={() => setTab('protocols')}>Protocols</button>
+          <button className={`btn ${tab === 'analytics' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={() => setTab('analytics')}>Analytics</button>
         </div>
       </div>
 
@@ -123,6 +129,10 @@ export default function HISPage() {
         <QuestionsManager depts={depts} />
       ) : tab === 'departments' ? (
         <DepartmentsManager depts={depts} onChange={loadDepts} />
+      ) : tab === 'protocols' ? (
+        <ProtocolsManager depts={depts} />
+      ) : tab === 'analytics' ? (
+        <AnalyticsDashboard />
       ) : (<>
 
       {/* Doctor Summary Cards */}
@@ -839,6 +849,400 @@ function DepartmentsManager({ depts, onChange }) {
           <p style={{ textAlign: 'center', color: 'var(--text-light)', padding: 32 }}>No departments yet</p>
         )}
       </div>
+    </div>
+  );
+}
+
+
+function ProtocolsManager({ depts = [] }) {
+  const [dept, setDept] = useState(depts[0]?.code || 'CARD');
+  const [protocols, setProtocols] = useState([]);
+  const [editing, setEditing] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+
+  useEffect(() => { loadProtocols(); }, [dept]);
+
+  async function loadProtocols() {
+    try { setProtocols(await api.getProtocols(dept)); } catch {}
+  }
+
+  const EMPTY = {
+    id: '', name: '', department: dept,
+    trigger_conditions: {}, trigger_medications: [],
+    required_tests: [], required_vitals: [],
+    pre_visit_msg_en: '', pre_visit_msg_hi: '', pre_visit_msg_te: '',
+    authored_by: '', version: '1.0',
+  };
+
+  function startNew() {
+    setEditing({ ...EMPTY, department: dept });
+    setError(''); setSuccess('');
+  }
+
+  function startEdit(p) {
+    setEditing({
+      ...p,
+      trigger_conditions: p.trigger_conditions || {},
+      trigger_medications: p.trigger_medications || [],
+      required_tests: p.required_tests || [],
+      required_vitals: p.required_vitals || [],
+    });
+    setError(''); setSuccess('');
+  }
+
+  async function handleSave(e) {
+    e.preventDefault();
+    setError(''); setSuccess('');
+    if (!editing.id || !editing.name) { setError('ID and name required'); return; }
+
+    setSaving(true);
+    try {
+      const existing = protocols.find(p => p.id === editing.id);
+      if (existing) {
+        await api.updateProtocol(editing.id, editing);
+        setSuccess('Protocol updated');
+      } else {
+        await api.createProtocol(editing);
+        setSuccess('Protocol created');
+      }
+      loadProtocols();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!confirm(`Deactivate protocol "${id}"?`)) return;
+    try {
+      await api.deleteProtocol(id);
+      loadProtocols();
+      if (editing?.id === id) setEditing(null);
+    } catch (err) {
+      alert('Failed: ' + err.message);
+    }
+  }
+
+  // Helpers for array fields
+  function updateList(field, value) {
+    setEditing(prev => ({ ...prev, [field]: value.split(',').map(s => s.trim()).filter(Boolean) }));
+  }
+
+  // Helpers for trigger_conditions (key-value pairs)
+  function setCondition(key, val) {
+    setEditing(prev => ({ ...prev, trigger_conditions: { ...prev.trigger_conditions, [key]: val } }));
+  }
+  function removeCondition(key) {
+    setEditing(prev => {
+      const c = { ...prev.trigger_conditions };
+      delete c[key];
+      return { ...prev, trigger_conditions: c };
+    });
+  }
+
+  return (
+    <div style={{ display: 'flex', gap: 16 }}>
+      {/* Left: protocol list */}
+      <div style={{ width: 380, flexShrink: 0 }}>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+          <select className="input" style={{ width: 160 }} value={dept} onChange={e => setDept(e.target.value)}>
+            {depts.filter(d => d.is_active).map(d => (
+              <option key={d.code} value={d.code}>{d.name}</option>
+            ))}
+          </select>
+          <button className="btn btn-primary" style={{ fontSize: 13, minHeight: 36, width: 'auto', padding: '0 16px' }}
+            onClick={startNew}>+ Add Protocol</button>
+        </div>
+
+        <p style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 8 }}>{protocols.length} active protocols</p>
+
+        {protocols.map(p => (
+          <div key={p.id} onClick={() => startEdit(p)}
+            style={{
+              background: editing?.id === p.id ? '#EBF5FB' : '#fff',
+              border: editing?.id === p.id ? '2px solid var(--secondary)' : '1px solid #E0E0E0',
+              borderRadius: 10, padding: 12, marginBottom: 6, cursor: 'pointer',
+            }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, flex: 1 }}>{p.name}</span>
+              <span style={{ fontSize: 10, background: '#F0F0F0', padding: '2px 6px', borderRadius: 4 }}>v{p.version || '1.0'}</span>
+            </div>
+            <p style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 4 }}>ID: {p.id}</p>
+            {p.required_vitals?.length > 0 && (
+              <p style={{ fontSize: 11, color: 'var(--secondary)', marginTop: 2 }}>Vitals: {p.required_vitals.join(', ')}</p>
+            )}
+            {p.required_tests?.length > 0 && (
+              <p style={{ fontSize: 11, color: 'var(--secondary)', marginTop: 2 }}>Tests: {p.required_tests.join(', ')}</p>
+            )}
+          </div>
+        ))}
+
+        {protocols.length === 0 && (
+          <p style={{ textAlign: 'center', color: 'var(--text-light)', padding: 32, fontSize: 13 }}>
+            No protocols for this department. Click "+ Add Protocol" to create one.
+          </p>
+        )}
+      </div>
+
+      {/* Right: editor */}
+      <div style={{ flex: 1, background: '#fff', borderRadius: 12, padding: 20, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        {!editing ? (
+          <div style={{ color: 'var(--text-light)', textAlign: 'center', marginTop: 40 }}>
+            <p>Select a protocol to edit, or click "+ Add Protocol"</p>
+            <p style={{ fontSize: 12, marginTop: 8 }}>
+              Protocols define clinical guardrails: trigger conditions (based on questionnaire answers),
+              required vitals/tests, and pre-visit messages for patients.
+            </p>
+          </div>
+        ) : (
+          <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+              <h3 style={{ fontSize: 16, color: 'var(--primary)', flex: 1 }}>
+                {protocols.find(p => p.id === editing.id) ? 'Edit Protocol' : 'New Protocol'}
+              </h3>
+              <button type="button" onClick={() => setEditing(null)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 18 }}>✕</button>
+            </div>
+
+            {/* ID + Name */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Protocol ID *</label>
+                <input className="input" required value={editing.id} placeholder="proto_chest_pain"
+                  onChange={e => setEditing({ ...editing, id: e.target.value })}
+                  disabled={!!protocols.find(p => p.id === editing.id)} />
+              </div>
+              <div style={{ width: 100 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Version</label>
+                <input className="input" value={editing.version || '1.0'}
+                  onChange={e => setEditing({ ...editing, version: e.target.value })} />
+              </div>
+            </div>
+
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Protocol Name *</label>
+              <input className="input" required value={editing.name}
+                onChange={e => setEditing({ ...editing, name: e.target.value })}
+                placeholder="Chest Pain Protocol" />
+            </div>
+
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Authored By</label>
+              <input className="input" value={editing.authored_by || ''}
+                onChange={e => setEditing({ ...editing, authored_by: e.target.value })}
+                placeholder="Dr. Name" />
+            </div>
+
+            {/* Trigger Conditions */}
+            <div style={{ background: '#F8F9FA', borderRadius: 8, padding: 12 }}>
+              <label style={{ fontSize: 12, fontWeight: 600 }}>Trigger Conditions</label>
+              <p style={{ fontSize: 10, color: 'var(--text-light)', marginBottom: 8 }}>
+                Question ID = expected answer. Protocol activates when any condition matches.
+              </p>
+              {Object.entries(editing.trigger_conditions || {}).map(([key, val]) => (
+                <div key={key} style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+                  <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} value={key} disabled />
+                  <span style={{ fontSize: 11 }}>=</span>
+                  <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} value={val}
+                    onChange={e => setCondition(key, e.target.value)} />
+                  <button type="button" onClick={() => removeCondition(key)}
+                    style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+                </div>
+              ))}
+              <div style={{ display: 'flex', gap: 4, marginTop: 4 }}>
+                <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} id="new-cond-key" placeholder="question_id" />
+                <input className="input" style={{ flex: 1, minHeight: 32, fontSize: 12 }} id="new-cond-val" placeholder="answer" />
+                <button type="button" onClick={() => {
+                  const k = document.getElementById('new-cond-key').value.trim();
+                  const v = document.getElementById('new-cond-val').value.trim();
+                  if (k && v) { setCondition(k, v); document.getElementById('new-cond-key').value = ''; document.getElementById('new-cond-val').value = ''; }
+                }} style={{ background: 'var(--secondary)', color: '#fff', border: 'none', borderRadius: 4, padding: '2px 8px', fontSize: 11, cursor: 'pointer' }}>
+                  + Add
+                </button>
+              </div>
+            </div>
+
+            {/* Required Vitals */}
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Required Vitals (comma-separated)</label>
+              <input className="input" value={(editing.required_vitals || []).join(', ')}
+                onChange={e => updateList('required_vitals', e.target.value)}
+                placeholder="BP, SpO2, Heart Rate" />
+            </div>
+
+            {/* Required Tests */}
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Required Tests (comma-separated)</label>
+              <input className="input" value={(editing.required_tests || []).join(', ')}
+                onChange={e => updateList('required_tests', e.target.value)}
+                placeholder="Lipid Profile, ECG, Troponin" />
+            </div>
+
+            {/* Pre-visit messages */}
+            <div>
+              <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Pre-visit Message (English)</label>
+              <textarea className="input" rows={2} value={editing.pre_visit_msg_en || ''}
+                onChange={e => setEditing({ ...editing, pre_visit_msg_en: e.target.value })}
+                placeholder="Please bring your recent blood test reports..." />
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Hindi</label>
+                <textarea className="input" rows={2} value={editing.pre_visit_msg_hi || ''}
+                  onChange={e => setEditing({ ...editing, pre_visit_msg_hi: e.target.value })} />
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ fontSize: 11, color: 'var(--text-light)' }}>Telugu</label>
+                <textarea className="input" rows={2} value={editing.pre_visit_msg_te || ''}
+                  onChange={e => setEditing({ ...editing, pre_visit_msg_te: e.target.value })} />
+              </div>
+            </div>
+
+            {error && <p style={{ color: 'var(--red)', fontSize: 13 }}>{error}</p>}
+            {success && <p style={{ color: 'var(--green)', fontSize: 13 }}>{success}</p>}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button className="btn btn-primary" type="submit" disabled={saving} style={{ flex: 1 }}>
+                {saving ? 'Saving...' : 'Save Protocol'}
+              </button>
+              {protocols.find(p => p.id === editing.id) && (
+                <button type="button" className="btn btn-outline" onClick={() => handleDelete(editing.id)}
+                  style={{ borderColor: 'var(--red)', color: 'var(--red)', width: 'auto', padding: '0 16px' }}>
+                  Deactivate
+                </button>
+              )}
+            </div>
+          </form>
+        )}
+      </div>
+    </div>
+  );
+}
+
+
+function AnalyticsDashboard() {
+  const [data, setData] = useState(null);
+  const [hours, setHours] = useState(24);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadData(); }, [hours]);
+
+  async function loadData() {
+    setLoading(true);
+    try { setData(await api.getAnalytics(hours)); } catch { setData(null); }
+    setLoading(false);
+  }
+
+  if (loading) return <p style={{ textAlign: 'center', padding: 40, color: 'var(--text-light)' }}>Loading analytics...</p>;
+  if (!data) return <p style={{ textAlign: 'center', padding: 40, color: 'var(--red)' }}>Failed to load analytics</p>;
+
+  const cardStyle = { background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.06)', flex: '1 1 200px', minWidth: 200 };
+  const thStyle = { padding: '8px 12px', textAlign: 'left', fontSize: 12, background: 'var(--primary)', color: '#fff' };
+  const tdStyle = { padding: '8px 12px', fontSize: 13, borderBottom: '1px solid #F0F0F0' };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ fontSize: 13, color: 'var(--text-light)' }}>Period:</span>
+        {[6, 12, 24, 48, 168].map(h => (
+          <button key={h} className={`btn ${hours === h ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 12, minHeight: 30, width: 'auto', padding: '0 12px' }}
+            onClick={() => setHours(h)}>
+            {h <= 24 ? `${h}h` : `${h / 24}d`}
+          </button>
+        ))}
+        <button className="btn btn-outline" style={{ fontSize: 12, minHeight: 30, width: 'auto', padding: '0 12px', marginLeft: 'auto' }}
+          onClick={loadData}>Refresh</button>
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        <div style={cardStyle}>
+          <p style={{ fontSize: 12, color: 'var(--text-light)' }}>Total Sessions</p>
+          <p style={{ fontSize: 28, fontWeight: 700, color: 'var(--primary)' }}>{data.total_sessions}</p>
+        </div>
+        <div style={cardStyle}>
+          <p style={{ fontSize: 12, color: 'var(--text-light)' }}>Completed</p>
+          <p style={{ fontSize: 28, fontWeight: 700, color: 'var(--green)' }}>{data.completed_count}</p>
+        </div>
+        <div style={cardStyle}>
+          <p style={{ fontSize: 12, color: 'var(--text-light)' }}>Avg Total Time</p>
+          <p style={{ fontSize: 28, fontWeight: 700, color: 'var(--secondary)' }}>{data.avg_total_minutes} min</p>
+        </div>
+        {data.by_triage?.map(t => (
+          <div key={t.level} style={cardStyle}>
+            <p style={{ fontSize: 12, color: 'var(--text-light)' }}>{t.level || 'GREEN'} Triage</p>
+            <p style={{ fontSize: 28, fontWeight: 700, color: t.level === 'RED' ? 'var(--red)' : t.level === 'AMBER' ? 'var(--amber)' : 'var(--green)' }}>{t.count}</p>
+          </div>
+        ))}
+      </div>
+
+      <div style={{ background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <h3 style={{ fontSize: 15, color: 'var(--primary)', marginBottom: 12 }}>By Department</h3>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>
+            <th style={thStyle}>Department</th><th style={thStyle}>Total</th><th style={thStyle}>Completed</th><th style={thStyle}>%</th>
+          </tr></thead>
+          <tbody>
+            {data.by_department?.map(d => (
+              <tr key={d.department}>
+                <td style={tdStyle}><strong>{d.department}</strong></td>
+                <td style={tdStyle}>{d.total}</td>
+                <td style={tdStyle}>{d.completed}</td>
+                <td style={tdStyle}>{d.total > 0 ? Math.round(d.completed / d.total * 100) : 0}%</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div style={{ background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+        <h3 style={{ fontSize: 15, color: 'var(--primary)', marginBottom: 12 }}>By Doctor</h3>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead><tr>
+            <th style={thStyle}>Doctor</th><th style={thStyle}>Dept</th><th style={thStyle}>Total</th><th style={thStyle}>Done</th><th style={thStyle}>RED</th>
+          </tr></thead>
+          <tbody>
+            {data.by_doctor?.map(d => (
+              <tr key={d.name}>
+                <td style={tdStyle}><strong>{d.name}</strong></td>
+                <td style={tdStyle}>{d.department}</td>
+                <td style={tdStyle}>{d.total}</td>
+                <td style={tdStyle}>{d.completed}</td>
+                <td style={{ ...tdStyle, color: d.red_count > 0 ? 'var(--red)' : 'inherit', fontWeight: d.red_count > 0 ? 700 : 400 }}>{d.red_count}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {(!data.by_doctor || data.by_doctor.length === 0) && (
+          <p style={{ textAlign: 'center', color: 'var(--text-light)', padding: 16, fontSize: 13 }}>No doctor-assigned sessions</p>
+        )}
+      </div>
+
+      <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+        {data.by_state?.map(s => (
+          <div key={s.state} style={{ background: '#fff', borderRadius: 8, padding: '8px 16px', textAlign: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+            <p style={{ fontSize: 11, color: 'var(--text-light)' }}>{s.state}</p>
+            <p style={{ fontSize: 20, fontWeight: 600 }}>{s.count}</p>
+          </div>
+        ))}
+      </div>
+
+      {data.followups?.length > 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 16, boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
+          <h3 style={{ fontSize: 15, color: 'var(--primary)', marginBottom: 12 }}>Follow-ups</h3>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+            {data.followups.map(f => (
+              <div key={f.status} style={{ background: '#F8F9FA', borderRadius: 8, padding: '8px 16px', textAlign: 'center' }}>
+                <p style={{ fontSize: 11, color: 'var(--text-light)' }}>{f.status}</p>
+                <p style={{ fontSize: 20, fontWeight: 600 }}>{f.count}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

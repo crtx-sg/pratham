@@ -256,8 +256,38 @@ def _fallback_report(session_json):
     return "\n".join(lines)
 
 
+# ICD-10 mapping for common OPD symptoms (question_id -> answer -> ICD-10 code + display)
+ICD10_MAP = {
+    "q_chest_pain": {"yes": {"code": "R07.9", "display": "Chest pain, unspecified"}},
+    "q_chest_pain_radiation": {"yes": {"code": "I20.9", "display": "Angina pectoris, unspecified"}},
+    "q_breathlessness": {
+        "at_rest": {"code": "R06.0", "display": "Dyspnea"},
+        "on_exertion": {"code": "R06.0", "display": "Dyspnea"},
+    },
+    "q_syncope": {"yes": {"code": "R55", "display": "Syncope and collapse"}},
+    "q_palpitations": {"yes": {"code": "R00.2", "display": "Palpitations"}},
+    "q_fever": {"yes": {"code": "R50.9", "display": "Fever, unspecified"}},
+    "q_cough": {"yes": {"code": "R05", "display": "Cough"}},
+    "q_headache": {"yes": {"code": "R51", "display": "Headache"}},
+    "q_abdominal_pain": {"yes": {"code": "R10.9", "display": "Unspecified abdominal pain"}},
+    "q_nausea": {"yes": {"code": "R11.0", "display": "Nausea"}},
+    "q_vomiting": {"yes": {"code": "R11.1", "display": "Vomiting"}},
+    "q_diarrhea": {"yes": {"code": "R19.7", "display": "Diarrhea, unspecified"}},
+    "q_fatigue": {"yes": {"code": "R53.83", "display": "Other fatigue"}},
+    "q_dizziness": {"yes": {"code": "R42", "display": "Dizziness and giddiness"}},
+    "q_swelling": {"yes": {"code": "R60.9", "display": "Edema, unspecified"}},
+    "q_weight_loss": {"yes": {"code": "R63.4", "display": "Abnormal weight loss"}},
+    "q_joint_pain": {"yes": {"code": "M25.50", "display": "Pain in unspecified joint"}},
+    "q_back_pain": {"yes": {"code": "M54.9", "display": "Dorsalgia, unspecified"}},
+    "q_urinary_issues": {"yes": {"code": "R39.9", "display": "Unspecified symptoms involving urinary system"}},
+    "q_skin_rash": {"yes": {"code": "R21", "display": "Rash and other nonspecific skin eruption"}},
+    "q_diabetes": {"yes": {"code": "E11.9", "display": "Type 2 diabetes mellitus without complications"}},
+    "q_hypertension": {"yes": {"code": "I10", "display": "Essential (primary) hypertension"}},
+}
+
+
 def _build_fhir_bundle(session, answers, vitals, doc_meds=None, doc_labs=None):
-    """Build a minimal FHIR R4 Bundle"""
+    """Build a minimal FHIR R4 Bundle with ICD-10 coding"""
     patient_id = str(session.get("id"))
     entries = []
 
@@ -296,17 +326,22 @@ def _build_fhir_bundle(session, answers, vitals, doc_meds=None, doc_labs=None):
                 }
             })
 
-    # Conditions from answers
+    # Conditions from answers — with ICD-10 coding
     answers_dict = {a["question_id"]: a["answer_raw"] for a in answers} if isinstance(answers, list) else answers
-    if answers_dict.get("q_chest_pain") == "yes":
-        entries.append({
-            "resource": {
-                "resourceType": "Condition",
-                "clinicalStatus": {"coding": [{"code": "active"}]},
-                "code": {"text": "Chest pain"},
-                "subject": {"reference": f"Patient/{patient_id}"},
-            }
-        })
+    for qid, answer_val in answers_dict.items():
+        if qid in ICD10_MAP and answer_val in ICD10_MAP[qid]:
+            icd = ICD10_MAP[qid][answer_val]
+            entries.append({
+                "resource": {
+                    "resourceType": "Condition",
+                    "clinicalStatus": {"coding": [{"code": "active"}]},
+                    "code": {
+                        "coding": [{"system": "http://hl7.org/fhir/sid/icd-10", "code": icd["code"], "display": icd["display"]}],
+                        "text": icd["display"],
+                    },
+                    "subject": {"reference": f"Patient/{patient_id}"},
+                }
+            })
 
     # MedicationStatements from documents
     for med in (doc_meds or []):

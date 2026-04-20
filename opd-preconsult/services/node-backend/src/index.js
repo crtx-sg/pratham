@@ -17,6 +17,12 @@ app.use('/api/q', require('./routes/questionnaire'));
 app.use('/api/vitals', require('./routes/vitals'));
 app.use('/api/admin', require('./routes/admin'));
 app.use('/api/doctor', require('./routes/doctor'));
+app.use('/api/protocol', require('./routes/protocol'));
+app.use('/api/alerts', require('./routes/alerts'));
+app.use('/api/whatsapp', require('./routes/whatsapp'));
+app.use('/api/prescription', require('./routes/prescription'));
+app.use('/api/followup', require('./routes/followup'));
+app.use('/api/analytics', require('./routes/analytics'));
 app.use('/his', require('./routes/mock-his'));
 
 // Seed questionnaire data on startup
@@ -71,6 +77,10 @@ async function start() {
   app.listen(PORT, () => {
     console.log(`[node-backend] Running on port ${PORT}`);
   });
+
+  // Start follow-up worker
+  const { startFollowupWorker } = require('./workers/followup-worker');
+  startFollowupWorker();
 }
 
 start();

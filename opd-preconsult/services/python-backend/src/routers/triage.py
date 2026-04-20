@@ -1,9 +1,25 @@
+import os
+import json
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
 from ..db import query, execute
 
 router = APIRouter(prefix="/api/triage", tags=["triage"])
+
+# Redis for publishing RED alerts to nursing station SSE
+_redis = None
+def _get_redis():
+    global _redis
+    if _redis is None:
+        redis_url = os.environ.get("REDIS_URL")
+        if redis_url:
+            try:
+                import redis
+                _redis = redis.from_url(redis_url)
+            except Exception:
+                _redis = False  # Mark as unavailable
+    return _redis if _redis else None
 
 class TriageRequest(BaseModel):
     session_id: str
@@ -73,5 +89,24 @@ async def evaluate(req: TriageRequest):
         "UPDATE sessions SET triage_level = %s, updated_at = NOW() WHERE id = %s",
         (level, req.session_id),
     )
+
+    # Publish RED alerts to nursing station via Redis
+    if level == "RED":
+        r = _get_redis()
+        if r:
+            try:
+                # Get patient info for the alert
+                session_rows = query("SELECT patient_name, department FROM sessions WHERE id = %s", (req.session_id,))
+                patient_info = session_rows[0] if session_rows else {}
+                alert = json.dumps({
+                    "session_id": req.session_id,
+                    "level": level,
+                    "triggered_rules": triggered,
+                    "patient_name": patient_info.get("patient_name", "Unknown"),
+                    "department": patient_info.get("department", ""),
+                })
+                r.publish("triage_alerts", alert)
+            except Exception as e:
+                print(f"[triage] Redis publish failed: {e}", flush=True)
 
     return TriageResponse(level=level, triggered_rules=triggered)

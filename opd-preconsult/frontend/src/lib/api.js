@@ -84,6 +84,45 @@ export const api = {
   deactivateDoctor: (id) => apiFetch(`/api/doctor/${id}/deactivate`, { method: 'POST' }),
   allSessions: (params) => apiFetch(`/api/doctor/all-sessions?${new URLSearchParams(params || {})}`),
 
+  // Prescription
+  createPrescription: (data) => apiFetch('/api/prescription', { method: 'POST', body: JSON.stringify(data) }),
+  getPrescriptions: (sessionId) => apiFetch(`/api/prescription/session/${sessionId}`),
+  verifyQR: (qr_payload) => apiFetch('/api/prescription/verify-qr', { method: 'POST', body: JSON.stringify({ qr_payload }) }),
+  getAllergies: (phone) => apiFetch(`/api/prescription/allergies/${phone}`),
+  addAllergy: (data) => apiFetch('/api/prescription/allergies', { method: 'POST', body: JSON.stringify(data) }),
+  checkInteractions: (data) => apiFetch('/api/prescription/check-interactions', { method: 'POST', body: JSON.stringify(data) }),
+  checkBulkInteractions: (data) => apiFetch('/api/prescription/check-bulk', { method: 'POST', body: JSON.stringify(data) }),
+
+  // Scribe
+  transcribeAudio: async (file, sessionId) => {
+    const formData = new FormData();
+    formData.append('file', file);
+    if (sessionId) formData.append('session_id', sessionId);
+    const headers = {};
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+    const res = await fetch(`${BASE}/api/scribe/transcribe`, { method: 'POST', headers, body: formData });
+    if (!res.ok) throw new Error('Transcription failed');
+    return res.json();
+  },
+  extractSOAP: (data) => apiFetch('/api/scribe/extract-soap', { method: 'POST', body: JSON.stringify(data) }),
+  getSOAP: (sessionId) => apiFetch(`/api/scribe/soap/${sessionId}`),
+
+  // Follow-ups
+  getFollowups: (params) => apiFetch(`/api/followup?${new URLSearchParams(params || {})}`),
+  createFollowup: (data) => apiFetch('/api/followup', { method: 'POST', body: JSON.stringify(data) }),
+  respondFollowup: (id, response) => apiFetch(`/api/followup/${id}/respond`, { method: 'POST', body: JSON.stringify({ response }) }),
+
+  // Analytics
+  getAnalytics: (hours) => apiFetch(`/api/analytics/summary?hours=${hours || 24}`),
+
+  // Protocols
+  getProtocols: (department) => apiFetch(`/api/protocol${department ? '?department=' + department : ''}`),
+  getProtocol: (id) => apiFetch(`/api/protocol/${id}`),
+  createProtocol: (data) => apiFetch('/api/protocol', { method: 'POST', body: JSON.stringify(data) }),
+  updateProtocol: (id, data) => apiFetch(`/api/protocol/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
+  deleteProtocol: (id) => apiFetch(`/api/protocol/${id}`, { method: 'DELETE' }),
+  evaluateProtocols: (sessionId) => apiFetch(`/api/protocol/evaluate/${sessionId}`),
+
   // Mock HIS
   hisDashboard: () => apiFetch('/his/dashboard'),
 };

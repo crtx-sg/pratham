@@ -11,11 +11,28 @@ export default function Vitals() {
     bp_systolic: '', bp_diastolic: '', weight_kg: '', spo2_pct: '', heart_rate: '', temperature_c: '',
   });
   const [loading, setLoading] = useState(false);
+  const [requiredVitals, setRequiredVitals] = useState([]);
+  const [requiredTests, setRequiredTests] = useState([]);
 
   useEffect(() => {
     setLang(sessionStorage.getItem('lang') || 'en');
     const token = sessionStorage.getItem('token');
     if (token) setToken(token);
+
+    // Check protocols for required vitals/tests
+    const sessionId = sessionStorage.getItem('session_id');
+    if (sessionId) {
+      api.evaluateProtocols(sessionId).then(data => {
+        const vitals = [];
+        const tests = [];
+        (data.matched_protocols || []).forEach(p => {
+          if (p.required_vitals) vitals.push(...(Array.isArray(p.required_vitals) ? p.required_vitals : []));
+          if (p.required_tests) tests.push(...(Array.isArray(p.required_tests) ? p.required_tests : []));
+        });
+        setRequiredVitals([...new Set(vitals)]);
+        setRequiredTests([...new Set(tests)]);
+      }).catch(() => {});
+    }
   }, []);
 
   async function handleSubmit(e) {
@@ -59,6 +76,14 @@ export default function Vitals() {
       </div>
       <form className="card" style={{ gap: 12 }} onSubmit={handleSubmit}>
         <h2 style={{ textAlign: 'center', color: 'var(--primary)' }}>{t('vitals_title', lang)}</h2>
+
+        {(requiredVitals.length > 0 || requiredTests.length > 0) && (
+          <div style={{ background: '#fff3cd', border: '1px solid #ffc107', borderRadius: 8, padding: 10, fontSize: 13 }}>
+            <strong>Protocol Required:</strong>
+            {requiredVitals.length > 0 && <div>Vitals: {requiredVitals.join(', ')}</div>}
+            {requiredTests.length > 0 && <div>Tests: {requiredTests.join(', ')}</div>}
+          </div>
+        )}
 
         {fields.map(([key, label, type, placeholder]) => (
           <div key={key}>

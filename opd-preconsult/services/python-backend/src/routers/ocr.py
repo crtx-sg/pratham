@@ -60,6 +60,17 @@ LAB_PATTERNS = {
     'platelet': re.compile(r'(?:platelet|PLT)\s*[:\-]?\s*(\d+\.?\d*)', re.I),
 }
 
+# Normal reference ranges: (low, high) — values outside trigger is_abnormal
+REFERENCE_RANGES = {
+    'PT_INR': (0.8, 1.2),
+    'HbA1c': (4.0, 5.6),
+    'FBS': (70, 100),
+    'creatinine': (0.7, 1.3),
+    'hemoglobin': (12.0, 17.5),
+    'WBC': (4.0, 11.0),
+    'platelet': (150, 400),
+}
+
 
 def preprocess_image(image: Image.Image) -> Image.Image:
     """Enhance image for better OCR on phone-captured prescriptions."""
@@ -110,16 +121,23 @@ def extract_medications(text: str) -> list:
 
 
 def extract_lab_values(text: str) -> list:
-    """Extract lab test results from OCR text."""
+    """Extract lab test results from OCR text with abnormal flagging."""
     results = []
     for test_name, pattern in LAB_PATTERNS.items():
         match = pattern.search(text)
         if match:
-            results.append({
+            value = float(match.group(1))
+            entry = {
                 'test': test_name,
-                'value': float(match.group(1)),
+                'value': value,
                 'raw_match': match.group(0),
-            })
+            }
+            ref = REFERENCE_RANGES.get(test_name)
+            if ref:
+                low, high = ref
+                entry['reference_range'] = f"{low}-{high}"
+                entry['is_abnormal'] = value < low or value > high
+            results.append(entry)
     return results
 
 
