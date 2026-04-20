@@ -1,19 +1,60 @@
 'use client';
 import { useState } from 'react';
 import VoiceButton from './VoiceButton';
+import { api } from '../lib/api';
+
+// Questions that support contextual document uploads
+const UPLOAD_CONFIG = {
+  q_medications: { label: 'Upload Prescription', docType: 'prescription' },
+  q_gen_medications: { label: 'Upload Prescription', docType: 'prescription' },
+  q_surgery_detail: { label: 'Upload Discharge Summary', docType: 'discharge_summary' },
+};
 
 export default function QuestionCard({ question, lang, onAnswer }) {
   const [value, setValue] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [ocrResult, setOcrResult] = useState(null);
 
   const text = question[`text_${lang}`] || question.text_en;
   const options = question.options_json || [];
   const type = question.q_type;
+  const uploadCfg = UPLOAD_CONFIG[question.id];
 
   function submit(val) {
     const answer = val || value;
     if (!answer && question.required) return;
     onAnswer(answer);
     setValue('');
+    setOcrResult(null);
+  }
+
+  async function handleUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    setOcrResult(null);
+    try {
+      const sessionId = sessionStorage.getItem('session_id');
+      const result = await api.uploadDocument(file, sessionId, uploadCfg.docType);
+      setOcrResult(result);
+
+      // Format OCR results into the answer text
+      if (uploadCfg.docType === 'prescription' && result.structured?.medications?.length) {
+        const medText = result.structured.medications.map(m => {
+          let line = m.name;
+          if (m.dose) line += ` ${m.dose}`;
+          if (m.frequency) line += ` ${m.frequency}`;
+          return line;
+        }).join(', ');
+        setValue(prev => prev ? `${prev}, ${medText}` : medText);
+      } else if (result.raw_text) {
+        setValue(prev => prev ? `${prev}\n${result.raw_text.slice(0, 300)}` : result.raw_text.slice(0, 300));
+      }
+    } catch (err) {
+      alert('Upload failed: ' + (err.message || 'Unknown error'));
+    } finally {
+      setUploading(false);
+    }
   }
 
   return (
@@ -55,6 +96,67 @@ export default function QuestionCard({ question, lang, onAnswer }) {
             placeholder={lang === 'hi' ? 'यहाँ टाइप करें...' : lang === 'te' ? 'ఇక్కడ టైప్ చేయండి...' : 'Type here...'}
           />
           <VoiceButton lang={lang} onResult={v => { setValue(v); submit(v); }} />
+
+          {/* Contextual document upload */}
+          {uploadCfg && (
+            <div style={{ background: '#F0F8FF', border: '1px dashed #4A90D9', borderRadius: 10, padding: 12, textAlign: 'center' }}>
+              <p style={{ fontSize: 12, color: 'var(--text-light)', marginBottom: 8 }}>
+                {lang === 'hi' ? 'या दस्तावेज़ अपलोड करें' : lang === 'te' ? 'లేదా పత్రం అప్‌లోడ్ చేయండి' : 'Or upload document'}
+              </p>
+              <label style={{
+                display: 'inline-block', background: 'var(--secondary)', color: '#fff',
+                borderRadius: 8, padding: '8px 16px', cursor: 'pointer', fontSize: 13,
+                opacity: uploading ? 0.6 : 1,
+              }}>
+                {uploading ? 'Processing...' : uploadCfg.label}
+                <input type="file" accept="image/*" capture="environment"
+                  onChange={handleUpload} disabled={uploading}
+                  style={{ display: 'none' }} />
+              </label>
+            </div>
+          )}
+
+          {/* OCR Results display */}
+          {ocrResult && ocrResult.structured?.medications?.length > 0 && (
+            <div style={{ background: '#D5F5E3', borderRadius: 8, padding: 10, fontSize: 12 }}>
+              <strong>Extracted medications:</strong>
+              <table style={{ width: '100%', marginTop: 6, fontSize: 12, borderCollapse: 'collapse' }}>
+                <thead>
+                  <tr style={{ borderBottom: '1px solid #A9DFBF' }}>
+                    <th style={{ textAlign: 'left', padding: '4px 6px' }}>Drug</th>
+                    <th style={{ textAlign: 'left', padding: '4px 6px' }}>Dose</th>
+                    <th style={{ textAlign: 'left', padding: '4px 6px' }}>Freq</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ocrResult.structured.medications.map((m, i) => (
+                    <tr key={i} style={{ borderBottom: '1px solid #E8F8F5' }}>
+                      <td style={{ padding: '4px 6px' }}>{m.name}</td>
+                      <td style={{ padding: '4px 6px' }}>{m.dose || '-'}</td>
+                      <td style={{ padding: '4px 6px' }}>{m.frequency || '-'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {ocrResult && ocrResult.structured?.lab_values?.length > 0 && (
+            <div style={{ background: '#FEF9E7', borderRadius: 8, padding: 10, fontSize: 12 }}>
+              <strong>Extracted lab values:</strong>
+              {ocrResult.structured.lab_values.map((l, i) => (
+                <span key={i} style={{
+                  display: 'inline-block', margin: '4px 4px 0 0', padding: '2px 8px',
+                  borderRadius: 4, fontSize: 11,
+                  background: l.is_abnormal ? '#FADBD8' : '#D5F5E3',
+                  color: l.is_abnormal ? '#C0392B' : '#1E8449',
+                }}>
+                  {l.test}: {l.value} {l.is_abnormal ? '(abnormal)' : ''}
+                </span>
+              ))}
+            </div>
+          )}
+
           <button className="btn btn-primary" onClick={() => submit()} disabled={!value}>
             {lang === 'hi' ? 'अगला' : lang === 'te' ? 'తదుపరి' : 'Next'}
           </button>

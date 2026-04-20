@@ -302,6 +302,7 @@ function PrescriptionPanel({ session, doctor }) {
   const [notes, setNotes] = useState('');
   const [drugFilter, setDrugFilter] = useState('');
   const [existingRx, setExistingRx] = useState([]);
+  const [currentMeds, setCurrentMeds] = useState([]);
 
   useEffect(() => {
     if (session?.patient_phone) {
@@ -309,6 +310,28 @@ function PrescriptionPanel({ session, doctor }) {
     }
     if (session?.id) {
       api.getPrescriptions(session.id).then(setExistingRx).catch(() => {});
+      // Load current medications from session report (OCR-extracted + patient-reported)
+      api.getReport(session.id).then(report => {
+        const meds = [];
+        const reportJson = report?.report_json;
+        if (reportJson?.medications_from_documents) {
+          reportJson.medications_from_documents.forEach(m => {
+            meds.push({ drug_name: m.name || '', dose: m.dose || '', frequency: m.frequency || '', source: 'document', duration: '', instructions: '' });
+          });
+        }
+        // Patient-reported from questionnaire answer
+        const patientMeds = reportJson?.answers?.q_medications;
+        if (patientMeds && patientMeds.toLowerCase() !== 'none' && patientMeds.toLowerCase() !== 'nil') {
+          // Try to parse comma-separated
+          patientMeds.split(',').forEach(m => {
+            const trimmed = m.trim();
+            if (trimmed && !meds.some(existing => existing.drug_name.toLowerCase() === trimmed.toLowerCase())) {
+              meds.push({ drug_name: trimmed, dose: '', frequency: '', source: 'patient', duration: '', instructions: '' });
+            }
+          });
+        }
+        setCurrentMeds(meds);
+      }).catch(() => {});
     }
     setSaved(null);
     setWarnings([]);
@@ -376,7 +399,59 @@ function PrescriptionPanel({ session, doctor }) {
         </div>
       )}
 
-      {/* Existing prescriptions */}
+      {/* Current medications from session (OCR + patient-reported) */}
+      {currentMeds.length > 0 && (
+        <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #E0E0E0' }}>
+          <h3 style={{ fontSize: 15, color: 'var(--primary)', marginBottom: 12 }}>Current Medications</h3>
+          <p style={{ fontSize: 11, color: 'var(--text-light)', marginBottom: 8 }}>
+            From patient intake (OCR and questionnaire). Edit, delete, or carry forward to prescription.
+          </p>
+          {currentMeds.map((med, idx) => (
+            <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div style={{ flex: 2, minWidth: 140 }}>
+                {idx === 0 && <label style={{ fontSize: 10, color: 'var(--text-light)' }}>Drug</label>}
+                <input className="input" value={med.drug_name}
+                  onChange={e => { const u = [...currentMeds]; u[idx] = { ...u[idx], drug_name: e.target.value }; setCurrentMeds(u); }}
+                  style={{ minHeight: 32, fontSize: 13 }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 60 }}>
+                {idx === 0 && <label style={{ fontSize: 10, color: 'var(--text-light)' }}>Dose</label>}
+                <input className="input" value={med.dose}
+                  onChange={e => { const u = [...currentMeds]; u[idx] = { ...u[idx], dose: e.target.value }; setCurrentMeds(u); }}
+                  style={{ minHeight: 32, fontSize: 13 }} placeholder="dose" />
+              </div>
+              <div style={{ width: 70 }}>
+                {idx === 0 && <label style={{ fontSize: 10, color: 'var(--text-light)' }}>Freq</label>}
+                <select className="input" value={med.frequency}
+                  onChange={e => { const u = [...currentMeds]; u[idx] = { ...u[idx], frequency: e.target.value }; setCurrentMeds(u); }}
+                  style={{ minHeight: 32, fontSize: 13 }}>
+                  <option value="">-</option>
+                  {FREQ_OPTIONS.map(f => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+              <span style={{ fontSize: 9, padding: '2px 6px', borderRadius: 4, background: med.source === 'document' ? '#EBF5FB' : '#FEF9E7', color: 'var(--text-light)' }}>
+                {med.source === 'document' ? 'OCR' : 'Patient'}
+              </span>
+              <button type="button" onClick={() => setCurrentMeds(currentMeds.filter((_, i) => i !== idx))}
+                style={{ background: 'none', border: 'none', color: 'var(--red)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+            </div>
+          ))}
+          <button type="button" onClick={() => {
+            // Carry all current meds into new prescription items
+            const toAdd = currentMeds.filter(m => m.drug_name).map(m => ({
+              drug_name: m.drug_name, dose: m.dose, frequency: m.frequency || 'OD', duration: '', instructions: '',
+            }));
+            if (toAdd.length) setItems(prev => {
+              const existing = prev.filter(i => i.drug_name);
+              return [...existing, ...toAdd, { drug_name: '', dose: '', frequency: 'OD', duration: '', instructions: '' }];
+            });
+          }} style={{ background: 'var(--secondary)', color: '#fff', border: 'none', borderRadius: 6, padding: '6px 14px', cursor: 'pointer', fontSize: 12, marginTop: 8 }}>
+            Continue all in prescription
+          </button>
+        </div>
+      )}
+
+      {/* Existing prescriptions from this session */}
       {existingRx.length > 0 && (
         <div style={{ background: '#F8F9FA', borderRadius: 8, padding: 10, fontSize: 12 }}>
           <strong>Previous Rx ({existingRx.length}):</strong>
@@ -388,7 +463,7 @@ function PrescriptionPanel({ session, doctor }) {
         </div>
       )}
 
-      {/* Prescription items */}
+      {/* New Prescription items */}
       <div style={{ background: '#fff', borderRadius: 12, padding: 16, border: '1px solid #E0E0E0' }}>
         <h3 style={{ fontSize: 15, color: 'var(--primary)', marginBottom: 12 }}>New Prescription</h3>
 

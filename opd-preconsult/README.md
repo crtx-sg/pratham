@@ -503,21 +503,169 @@ docker compose down -v
 
 ## Deployment (Railway.app)
 
-Single-container build running nginx + node + python + frontend via supervisord.
+Single-container build running nginx + node-backend + python-backend + frontend via supervisord.
 
-1. Push to GitHub, create Railway project from repo
-2. Set Root Directory = `opd-preconsult`, Dockerfile Path = `Dockerfile.railway`
-3. Add PostgreSQL plugin (Redis optional but recommended for SSE alerts)
-4. Set env vars:
+### Architecture on Railway
+
+```
+Railway Container (single process: supervisord)
+├── nginx :$PORT          ← Railway public port, reverse proxy
+├── node-backend :4001    ← Express (session, doctor, prescription, followup, analytics)
+├── python-backend :4002  ← FastAPI (LLM, triage, OCR, scribe, drug interactions)
+└── frontend :3000        ← Next.js standalone
+```
+
+All services run in one container. Nginx handles routing. Migrations run automatically on startup via `deploy/start.sh`.
+
+### Initial Setup
+
+1. **Create project**: Push to GitHub → create Railway project from repo
+2. **Service settings**:
+   - Root Directory: `opd-preconsult`
+   - Dockerfile Path: `Dockerfile.railway`
+   - Start Command: `/app/deploy/start.sh`
+3. **Add PostgreSQL plugin**: Railway sidebar → + New → Database → PostgreSQL
+4. **Add Redis plugin** (recommended): + New → Database → Redis
+5. **Set environment variables** (Service → Variables → Raw Editor):
    ```
    DATABASE_URL=${{Postgres.DATABASE_URL}}
-   JWT_SECRET=<random-64-char>
+   REDIS_URL=${{Redis.REDIS_URL}}
+   JWT_SECRET=<random-64-char-string>
    DEMO_QR_SECRET=<random-string>
-   GEMINI_API_KEY=...
-   OPENAI_API_KEY=...
+   GEMINI_API_KEY=AIzaSy...
+   OPENAI_API_KEY=sk-...
+   TWILIO_ACCOUNT_SID=AC...
+   TWILIO_AUTH_TOKEN=...
+   TWILIO_WHATSAPP_FROM=whatsapp:+14155238886
+   DEMO_HOSPITAL_ID=demo_hospital_01
+   DEMO_HOSPITAL_NAME=Demo City Hospital
    ```
-5. Health check path = `/healthz`, timeout = 300s
-6. Deploy — migrations run automatically on startup
+6. **Health check** (Service → Settings → Deploy):
+   - Path: `/healthz`
+   - Timeout: 300s
+7. **Deploy**: Railway auto-deploys on each git push to main
+
+### Railway CLI Commands
+
+```bash
+# ── Install & Auth ──
+npm i -g @railway/cli
+railway login                           # Browser-based OAuth login
+railway whoami                          # Verify logged in
+
+# ── Project Linking ──
+railway list                            # List all projects
+railway link --project pratham-opd      # Link local dir to project
+railway service pratham                 # Link to specific service
+railway status                          # Show current project/env/service
+
+# ── Deploying ──
+railway up --service pratham --detach   # Deploy local dir (bypasses GitHub)
+railway redeploy --service pratham      # Redeploy existing image
+
+# ── Logs & Debugging ──
+railway logs --service pratham           # Runtime logs (tail)
+railway logs --service pratham --build   # Docker build logs
+railway logs --service pratham --deployment  # Latest deployment startup logs
+
+# ── Configuration ──
+railway variables --service pratham      # List all env vars
+railway domain                           # Show public domain URL
+
+# ── Useful Filters ──
+# Check migrations ran:
+railway logs --service pratham --deployment 2>&1 | grep "migration"
+
+# Verify new features started:
+railway logs --service pratham --deployment 2>&1 | grep "followup-worker\|alerts"
+
+# Check build time (8s = cached, 60s+ = full rebuild):
+railway logs --service pratham --build 2>&1 | grep "Build time"
+```
+
+### Triggering a Redeploy
+
+Railway auto-deploys on git push if connected to GitHub. To force a rebuild:
+
+```bash
+# Option 1: Push any change to trigger GitHub auto-deploy
+git commit --allow-empty -m "trigger redeploy" && git push
+
+# Option 2: Deploy from local directory (no git push needed)
+cd opd-preconsult
+railway up --service pratham --detach
+```
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Old code still running after push | Docker layer cache | Change a line in `Dockerfile.railway` to bust cache, then push |
+| `/healthz` returns Next.js HTML | Nginx not routing correctly | Check `deploy/nginx.conf` has `/healthz` location block |
+| Only 5 migrations ran | Old Docker image served from cache | Full rebuild needed — modify Dockerfile or requirements.txt |
+| `gemini-2.0-flash-exp` 404 error | Model deprecated | Set `GEMINI_MODEL=gemini-2.0-flash` in Railway variables |
+| `followup-worker` not in logs | Old build without worker | Confirm `services/node-backend/src/workers/` exists in build |
+| SSE alerts not working | `REDIS_URL` not set | Add Redis plugin, set `REDIS_URL=${{Redis.REDIS_URL}}` |
+| Scribe returns placeholder | `OPENAI_API_KEY` not set | Add OpenAI API key to Railway variables |
+| WhatsApp webhook not receiving | Webhook URL not configured in Twilio | Set webhook to `https://<domain>/api/whatsapp/webhook` in Twilio console |
+
+### Key Files for Railway Deployment
+
+```
+opd-preconsult/
+├── Dockerfile.railway       # Multi-stage Docker build
+├── railway.toml             # Build config + health check + watch patterns
+├── deploy/
+│   ├── start.sh             # Entry point: migrations → nginx config → supervisord
+│   ├── nginx.conf           # Reverse proxy (all routes, SSE, scribe upload limits)
+│   └── supervisord.conf     # Process manager template (overwritten by start.sh)
+└── start.sh                 # Root shim → delegates to deploy/start.sh
+```
+
+### Watch Patterns
+
+`railway.toml` defines which file changes trigger a rebuild:
+```toml
+watchPatterns = ["services/**", "frontend/**", "db/**", "deploy/**", "Dockerfile.railway"]
+```
+
+If you change only files outside these patterns (e.g., `README.md`), Railway won't auto-deploy.
+
+### Verifying a Deployment
+
+After deploy, verify all features are live:
+
+```bash
+DOMAIN=https://pratham-production.up.railway.app
+
+# Health check
+curl -s $DOMAIN/healthz
+# Expected: "ok"
+
+# Node backend health
+curl -s $DOMAIN/api/session | head -c 100
+# Expected: JSON array (sessions list)
+
+# Python backend health
+curl -s $DOMAIN/api/triage/evaluate -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"session_id":"00000000-0000-0000-0000-000000000000"}'
+# Expected: 404 (session not found) — confirms Python backend routes work
+
+# Analytics (new feature)
+curl -s $DOMAIN/api/analytics/summary?hours=24
+# Expected: JSON with total_sessions, by_department, etc.
+
+# Protocol API (new feature)
+curl -s $DOMAIN/api/protocol
+# Expected: JSON array (empty or with protocols)
+
+# Drug interaction check (new feature)
+curl -s $DOMAIN/api/prescription/check-bulk -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"drugs":["metoprolol","verapamil"],"patient_allergies":[]}'
+# Expected: {"has_block": true, "warnings": [...]}
+```
 
 ## Out of Scope
 

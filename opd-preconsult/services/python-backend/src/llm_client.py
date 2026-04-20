@@ -30,7 +30,7 @@ def _gemini_complete(api_key: str, system_prompt: str, user_content: str, max_to
     from google.genai import types
 
     client = genai.Client(api_key=api_key)
-    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash-exp")
+    model = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
     response = client.models.generate_content(
         model=model,
