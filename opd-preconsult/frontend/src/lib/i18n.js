@@ -1,6 +1,6 @@
 const strings = {
   en: {
-    welcome: 'Welcome to Pre-Consultation',
+    welcome: 'Welcome to Pratham, OPD Pre-Consultation AI Agent',
     scan_prompt: 'Scan the QR code at the registration counter',
     register: 'Register',
     name: 'Full Name',
@@ -37,7 +37,7 @@ const strings = {
     language: 'Language',
   },
   hi: {
-    welcome: 'प्री-कंसल्टेशन में आपका स्वागत है',
+    welcome: 'Pratham में आपका स्वागत है, OPD प्री-कंसल्टेशन AI एजेंट',
     scan_prompt: 'रजिस्ट्रेशन काउंटर पर QR कोड स्कैन करें',
     register: 'रजिस्टर करें',
     name: 'पूरा नाम',
@@ -74,7 +74,7 @@ const strings = {
     language: 'भाषा',
   },
   te: {
-    welcome: 'ప్రీ-కన్సల్టేషన్‌కు స్వాగతం',
+    welcome: 'Pratham కు స్వాగతం, OPD ప్రీ-కన్సల్టేషన్ AI ఏజెంట్',
     scan_prompt: 'రిజిస్ట్రేషన్ కౌంటర్ వద్ద QR కోడ్ స్కాన్ చేయండి',
     register: 'రిజిస్టర్ చేయండి',
     name: 'పూర్తి పేరు',
