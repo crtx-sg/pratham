@@ -1,0 +1,104 @@
+# Render Blueprint — OPD Pre-Consultation POC
+# Single-container web service + managed Postgres + managed Key Value (Redis).
+# Docs: https://render.com/docs/blueprint-spec
+#
+# Free tier notes:
+#   - Web service spins down after 15 min of inactivity; first request after
+#     spin-down takes ~30-60s to wake.
+#   - Free Postgres expires 90 days after creation (Render emails before).
+#   - Free Key Value: 25 MB, OK for SSE pub/sub.
+#
+# To deploy:
+#   1. Push this repo to GitHub
+#   2. Render Dashboard → New + → Blueprint → connect repo
+#   3. After provisioning, fill in `sync: false` secrets in the dashboard.
+
+databases:
+  - name: opd-postgres
+    databaseName: opd_preconsult
+    user: opd_user
+    plan: free
+    postgresMajorVersion: "16"
+
+services:
+  - type: keyvalue
+    name: opd-redis
+    plan: free
+    ipAllowList: []   # private; reachable only from services in this Blueprint
+
+  - type: web
+    name: opd-preconsult
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /healthz
+    autoDeployTrigger: commit
+
+    envVars:
+      # ── Auto-wired infra ─────────────────────────────────────────
+      - key: DATABASE_URL
+        fromDatabase:
+          name: opd-postgres
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: keyvalue
+          name: opd-redis
+          property: connectionString
+
+      # ── App secrets (auto-generated; rotate via dashboard) ───────
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DEMO_QR_SECRET
+        generateValue: true
+
+      # ── Demo config (safe to commit) ─────────────────────────────
+      - key: DEMO_HOSPITAL_ID
+        value: demo_hospital_01
+      - key: DEMO_HOSPITAL_NAME
+        value: Demo City Hospital
+      - key: NODE_ENV
+        value: production
+
+      # ── LLM / external services (set in dashboard) ───────────────
+      # Leave unset to use rule-based fallback / graceful degrade.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        sync: false      # e.g. gemini-2.0-flash
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: OPENAI_API_KEY
+        sync: false      # Whisper transcription for ambient scribe
+
+      # ── Twilio (set in dashboard; dry-run if unset) ──────────────
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_WHATSAPP_FROM
+        sync: false      # e.g. whatsapp:+14155238886
+      - key: TWILIO_SMS_FROM
+        sync: false
+
+      # ── Object storage (S3-compatible) ───────────────────────────
+      # Render does not host MinIO. To enable document uploads in prod,
+      # provision AWS S3 / Cloudflare R2 / Backblaze B2 and set these.
+      # Locally, docker-compose.yml runs MinIO on the same vars.
+      - key: MINIO_ENDPOINT
+        sync: false
+      - key: MINIO_PORT
+        sync: false
+      - key: MINIO_ACCESS_KEY
+        sync: false
+      - key: MINIO_SECRET_KEY
+        sync: false
+      - key: MINIO_BUCKET
+        sync: false
+
+      # ── HIS webhook (mock; loops back to node-backend) ───────────
+      - key: HIS_WEBHOOK_URL
+        value: http://127.0.0.1:4001/his/fhir/bundle
+      - key: HIS_WEBHOOK_TOKEN
+        value: mock_token_for_poc

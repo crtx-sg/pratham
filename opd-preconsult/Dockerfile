@@ -1,6 +1,7 @@
 # =============================================================
-# OPD Pre-Consultation POC — Single-container Railway deployment
+# OPD Pre-Consultation POC — Single-container deployment
 # Runs: nginx + node-backend + python-backend + next.js frontend
+# Targets: Railway, Render, any Docker-capable PaaS
 # Build: v2 — includes protocols, prescriptions, scribe, analytics
 # =============================================================
 
@@ -10,7 +11,7 @@ WORKDIR /build/frontend
 COPY frontend/package.json ./
 RUN npm install
 COPY frontend/ ./
-# In Railway single-container, nginx on localhost handles routing
+# Single-container: nginx on localhost handles routing for all services
 ENV NEXT_PUBLIC_API_BASE=""
 ENV API_INTERNAL_URL="http://127.0.0.1:8080"
 RUN npm run build

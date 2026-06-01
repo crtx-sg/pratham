@@ -135,7 +135,9 @@ Indian OPDs see 2,000–15,000 patients/day. Doctors get under 1 minute per pati
 ```
 opd-preconsult/
 ├── docker-compose.yml
-├── Dockerfile.railway
+├── Dockerfile
+├── render.yaml
+├── railway.toml
 ├── .env.example
 ├── db/migrations/
 │   ├── 001_sessions.sql          # Core session tables
@@ -522,7 +524,7 @@ All services run in one container. Nginx handles routing. Migrations run automat
 1. **Create project**: Push to GitHub → create Railway project from repo
 2. **Service settings**:
    - Root Directory: `opd-preconsult`
-   - Dockerfile Path: `Dockerfile.railway`
+   - Dockerfile Path: `Dockerfile`
    - Start Command: `/app/deploy/start.sh`
 3. **Add PostgreSQL plugin**: Railway sidebar → + New → Database → PostgreSQL
 4. **Add Redis plugin** (recommended): + New → Database → Redis
@@ -600,7 +602,7 @@ railway up --service pratham --detach
 
 | Symptom | Cause | Fix |
 |---------|-------|-----|
-| Old code still running after push | Docker layer cache | Change a line in `Dockerfile.railway` to bust cache, then push |
+| Old code still running after push | Docker layer cache | Change a line in `Dockerfile` to bust cache, then push |
 | `/healthz` returns Next.js HTML | Nginx not routing correctly | Check `deploy/nginx.conf` has `/healthz` location block |
 | Only 5 migrations ran | Old Docker image served from cache | Full rebuild needed — modify Dockerfile or requirements.txt |
 | `gemini-2.0-flash-exp` 404 error | Model deprecated | Set `GEMINI_MODEL=gemini-2.0-flash` in Railway variables |
@@ -613,7 +615,7 @@ railway up --service pratham --detach
 
 ```
 opd-preconsult/
-├── Dockerfile.railway       # Multi-stage Docker build
+├── Dockerfile               # Multi-stage Docker build (shared: Railway + Render)
 ├── railway.toml             # Build config + health check + watch patterns
 ├── deploy/
 │   ├── start.sh             # Entry point: migrations → nginx config → supervisord
@@ -626,7 +628,7 @@ opd-preconsult/
 
 `railway.toml` defines which file changes trigger a rebuild:
 ```toml
-watchPatterns = ["services/**", "frontend/**", "db/**", "deploy/**", "Dockerfile.railway"]
+watchPatterns = ["services/**", "frontend/**", "db/**", "deploy/**", "Dockerfile"]
 ```
 
 If you change only files outside these patterns (e.g., `README.md`), Railway won't auto-deploy.
@@ -665,6 +667,139 @@ curl -s $DOMAIN/api/prescription/check-bulk -X POST \
   -H "Content-Type: application/json" \
   -d '{"drugs":["metoprolol","verapamil"],"patient_allergies":[]}'
 # Expected: {"has_block": true, "warnings": [...]}
+```
+
+## Deployment (Render.com)
+
+Same single-container image as Railway. `render.yaml` is a Render Blueprint that provisions the web service + managed Postgres + managed Key Value (Redis-compatible) in one shot.
+
+### Architecture on Render
+
+```
+Render Web Service (Docker, single container: supervisord)
+├── nginx :$PORT             ← Render public port, reverse proxy
+├── node-backend :4001       ← Express
+├── python-backend :4002     ← FastAPI
+└── frontend :3000           ← Next.js standalone
+        ↓
+Render Postgres (managed)    ← DATABASE_URL auto-wired
+Render Key Value (managed)   ← REDIS_URL auto-wired
+```
+
+### One-Click Blueprint Setup
+
+1. Push this repo to GitHub.
+2. Render Dashboard → **New +** → **Blueprint** → select the repo.
+3. Render reads `render.yaml`, provisions web + Postgres + Key Value.
+4. Open the new web service → **Environment** → fill in the `sync: false` secrets:
+   - `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY`) — LLM reports
+   - `OPENAI_API_KEY` — Whisper transcription
+   - `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_FROM`, `TWILIO_SMS_FROM` — WhatsApp/SMS
+   - `MINIO_*` — optional, only if wiring an external S3-compatible bucket (AWS S3 / Cloudflare R2 / Backblaze B2). Render does not host MinIO.
+5. Service redeploys automatically after each env edit.
+
+`DATABASE_URL`, `REDIS_URL`, `JWT_SECRET`, `DEMO_QR_SECRET` are populated automatically — do not touch them.
+
+### Manual Setup (without Blueprint)
+
+If you prefer not to use `render.yaml`:
+
+1. Create a **Postgres** instance (Free, version 16, db name `opd_preconsult`, user `opd_user`).
+2. Create a **Key Value** instance (Free).
+3. Create a **Web Service** → Build from this repo:
+   - Runtime: **Docker**
+   - Dockerfile Path: `Dockerfile`
+   - Health Check Path: `/healthz`
+4. Add env vars per the Blueprint list above. For `DATABASE_URL` and `REDIS_URL` use Render's "Add from database/service" picker.
+
+### Render CLI Commands
+
+```bash
+# ── Install & Auth ──
+npm i -g render-cli                       # Or use the official binary
+render login
+
+# ── Linking ──
+render workspaces                         # List workspaces
+render services                           # List services in current workspace
+
+# ── Deploying ──
+# Render auto-deploys on git push to the branch you connected.
+# Force a redeploy from CLI:
+render deploys create --service-id srv-xxxxx
+
+# ── Logs ──
+render logs --service opd-preconsult --tail
+render logs --service opd-preconsult --type build   # build logs
+
+# ── Filters (via grep) ──
+render logs --service opd-preconsult --tail | grep "migration"
+render logs --service opd-preconsult --tail | grep "followup-worker"
+```
+
+If `render-cli` is not installed, every command above is also available in the Render dashboard.
+
+### Free-Tier Caveats
+
+| Caveat | Impact | Mitigation |
+|--------|--------|------------|
+| Web service spins down after 15 min idle | First request after idle takes ~30-60s | Upgrade to Starter ($7/mo) or keep warm with an external pinger |
+| Free Postgres expires 90 days after creation | DB will be deleted | Render emails ahead; back up via `pg_dump`, recreate, restore |
+| Free Key Value capped at 25 MB | OK for SSE pub/sub; not for caching large reports | Upgrade to a paid Key Value plan if needed |
+| No persistent disk on free web | Local file writes vanish on restart | Use external S3 for document storage (see `MINIO_*` env vars) |
+| Build timeout 15 min | First build ~6-8 min (Tesseract OCR) is fine | Subsequent builds use Docker layer cache |
+
+### Triggering a Redeploy
+
+Render auto-deploys on git push. To force a rebuild without code change:
+
+```bash
+git commit --allow-empty -m "trigger render redeploy" && git push
+# Or via dashboard: Service → Manual Deploy → Deploy latest commit
+```
+
+### Verifying a Render Deployment
+
+After deploy, the service URL is `https://opd-preconsult-<random>.onrender.com`:
+
+```bash
+DOMAIN=https://opd-preconsult-XXXX.onrender.com
+
+# Health check
+curl -s $DOMAIN/healthz                  # Expected: "ok"
+
+# Node backend
+curl -s $DOMAIN/api/analytics/summary?hours=24
+
+# Python backend
+curl -s $DOMAIN/api/prescription/check-bulk -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"drugs":["metoprolol","verapamil"],"patient_allergies":[]}'
+# Expected: {"has_block": true, "warnings": [...]}
+```
+
+### Render Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Build fails at `apt-get install` | Render Free build node ran out of memory | Retry; consider upgrading build instance |
+| `/healthz` 502 for first ~60s after deploy | Migrations + service startup | Render's healthcheck timeout is forgiving; wait it out |
+| `DATABASE_URL` missing in env | Blueprint wasn't used / picker not connected | Reattach the database in the Environment tab |
+| Build skipped on push | Branch not connected, or `autoDeployTrigger` disabled | Check Service → Settings → Auto-Deploy |
+| `gemini-2.0-flash-exp` 404 | Model deprecated | Set `GEMINI_MODEL=gemini-2.0-flash` |
+| SSE alerts not firing | `REDIS_URL` not wired | Verify Key Value service is `available` in dashboard |
+| Document uploads fail | No object storage configured | Wire `MINIO_*` to an external S3-compatible bucket |
+
+### Key Files for Render Deployment
+
+```
+opd-preconsult/
+├── Dockerfile               # Shared with Railway
+├── render.yaml              # Blueprint: web + Postgres + Key Value + env mapping
+├── deploy/
+│   ├── start.sh             # Migrations → nginx config → supervisord (no changes needed)
+│   ├── nginx.conf           # Reverse proxy (uses $PORT, set by Render)
+│   └── supervisord.conf     # Template (overwritten by start.sh)
 ```
 
 ## Out of Scope

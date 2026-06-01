@@ -103,7 +103,7 @@ NODE_BACKEND="$BASE/services/node-backend"
 PYTHON_BACKEND="$BASE/services/python-backend"
 FRONTEND="$BASE/frontend/.next/standalone"
 
-# Fallback to /app layout (Dockerfile.railway)
+# Fallback to /app layout (Dockerfile)
 [ -d "$NODE_BACKEND/src" ] || NODE_BACKEND="/app/node-backend"
 [ -d "$PYTHON_BACKEND/src" ] || PYTHON_BACKEND="/app/python-backend"
 [ -d "$FRONTEND" ] || FRONTEND="/app/frontend"
