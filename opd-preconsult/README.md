@@ -793,14 +793,22 @@ curl -s $DOMAIN/api/prescription/check-bulk -X POST \
 ### Key Files for Render Deployment
 
 ```
-opd-preconsult/
-├── Dockerfile               # Shared with Railway
-├── render.yaml              # Blueprint: web + Postgres + Key Value + env mapping
-├── deploy/
-│   ├── start.sh             # Migrations → nginx config → supervisord (no changes needed)
-│   ├── nginx.conf           # Reverse proxy (uses $PORT, set by Render)
-│   └── supervisord.conf     # Template (overwritten by start.sh)
+<repo-root>/
+├── render.yaml              # Blueprint at REPO ROOT (Render auto-detects only here)
+└── opd-preconsult/          # rootDir for the web service
+    ├── Dockerfile           # Shared with Railway
+    └── deploy/
+        ├── start.sh         # Migrations → nginx config → supervisord (no changes needed)
+        ├── nginx.conf       # Reverse proxy (uses $PORT, set by Render)
+        └── supervisord.conf # Template (overwritten by start.sh)
 ```
+
+> **Monorepo note:** because this app lives at `opd-preconsult/` inside the
+> `crtx-sg/pratham` repo, `render.yaml` *must* sit at the repo root and use
+> `rootDir: opd-preconsult` to scope the build context. If you set the
+> service up manually instead of via Blueprint, set **Root Directory** =
+> `opd-preconsult` in the service settings — otherwise Render's builder
+> won't find the Dockerfile.
 
 ## Out of Scope
 

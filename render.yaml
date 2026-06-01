@@ -30,8 +30,9 @@ services:
     name: opd-preconsult
     runtime: docker
     plan: free
-    dockerfilePath: ./Dockerfile
-    dockerContext: .
+    rootDir: opd-preconsult          # app lives in a subdirectory of the repo
+    dockerfilePath: ./Dockerfile      # relative to rootDir → opd-preconsult/Dockerfile
+    dockerContext: .                  # relative to rootDir → opd-preconsult/
     healthCheckPath: /healthz
     autoDeployTrigger: commit
 
